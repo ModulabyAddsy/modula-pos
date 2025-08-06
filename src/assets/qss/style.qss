@@ -1,0 +1,85 @@
+/* src/assets/qss/style.qss */
+
+/* Estilo general para la ventana y fuentes */
+QWidget {
+    font-family: 'Inter', sans-serif;
+    color: #374151; /* gray-700 */
+    font-size: 14px;
+}
+
+/* Contenedor principal que simula la "card" */
+#AuthView, #MainWindow {
+    background-color: #ffffff;
+}
+
+/* Inputs de formulario */
+QLineEdit {
+    background-color: #F9FAFB;
+    border: 1px solid #D1D5DB;
+    border-radius: 8px;
+    padding: 8px 10px; /* 8px vertical, 10px horizontal */
+    color: #374151;
+}
+
+QLineEdit:focus {
+    border: 2px solid #3B82F6; /* blue-500 */
+}
+
+/* Botón Primario (Login, Registrar) */
+QPushButton#primary {
+    background-color: #2563EB; /* blue-600 */
+    color: white;
+    font-weight: 600;
+    border-radius: 8px;
+    padding: 12px;
+    border: none;
+}
+
+QPushButton#primary:hover {
+    background-color: #1D4ED8; /* blue-700 */
+}
+
+/* Títulos */
+QLabel#h1 {
+    font-size: 24px;
+    font-weight: 700;
+    color: #1F2937; /* gray-800 */
+}
+
+QLabel#h2 {
+    font-size: 18px;
+    font-weight: 600;
+    color: #374151; /* gray-700 */
+}
+
+/* Pestañas (Login / Registro) */
+QTabBar::tab {
+    padding: 10px;
+    font-weight: 600;
+    font-size: 13px;
+    color: #6B7281; /* gray-500 */
+    border-bottom: 2px solid transparent;
+}
+
+QTabBar::tab:selected {
+    color: #2563EB; /* blue-600 */
+    border-bottom: 2px solid #2563EB; /* blue-600 */
+}
+
+QTabWidget::pane {
+    border: none;
+}
+
+/* Botón con estilo de enlace (para 'Recuperar Contraseña') */
+QPushButton#link-style-button {
+    background-color: transparent; /* Sin fondo */
+    border: none;                  /* Sin borde */
+    color: #3B82F6;               /* Color azul (blue-500) */
+    text-align: right;             /* Alineado a la derecha, debajo del input */
+    padding: 0px;                  /* Sin relleno extra */
+    text-decoration: underline;    /* Subrayado */
+}
+
+QPushButton#link-style-button:hover {
+    color: #1D4ED8; /* Azul más oscuro al pasar el mouse (blue-700) */
+}
