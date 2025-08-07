@@ -82,6 +82,8 @@ class RegisterForm(QWidget):
         main_layout.addWidget(self.submit_button)
 
     def submit(self):
+        # ✅ CORRECCIÓN: Ya no generamos un UUID aleatorio aquí.
+        # El AppController se encargará de generar el ID de hardware y añadirlo.
         data = {
             "nombre_completo": self.nombre_completo.text(),
             "correo": self.correo.text(),
@@ -90,7 +92,7 @@ class RegisterForm(QWidget):
             "fecha_nacimiento": self.fecha_nacimiento.date().toString("yyyy-MM-dd"),
             "nombre_empresa": self.nombre_empresa.text(),
             "rfc": self.rfc.text(),
-            "id_terminal": str(uuid.uuid4())
+            # "id_terminal" se añadirá en el AppController
         }
         self.registro_solicitado.emit(data)
 

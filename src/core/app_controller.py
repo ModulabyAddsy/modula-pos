@@ -288,29 +288,31 @@ class AppController:
         Inicia el nuevo flujo de registro con polling.
         """
         try:
-            # 1. Generar y añadir el claim token
+            # ✅ CORRECCIÓN: Generar el ID de hardware aquí y añadirlo a los datos
+            hardware_id = self._generar_id_estable()
+            user_data["id_terminal"] = hardware_id
+            
             self.claim_token = str(uuid.uuid4())
             user_data["claim_token"] = self.claim_token
             
-            # 2. Llamar al backend para obtener la URL de Stripe
             respuesta = self.api_client.registrar_cuenta(user_data)
             
             url_checkout = respuesta.get("url_checkout")
             if url_checkout:
                 webbrowser.open(url_checkout)
                 
-                # 3. Cambiar a la vista de espera y empezar el polling
                 self.main_window.mostrar_vista_carga()
+                # La clase LoadingView necesita un método set_message para esto
                 self.main_window.loading_view.set_message(
                     "Esperando activación de la cuenta...",
                     "Por favor, completa el pago y la verificación por correo en tu navegador."
                 )
-                self.polling_timer.start(5000) # Preguntar cada 5 segundos
+                self.polling_timer.start(5000)
             else:
                 self.show_error("El servidor no devolvió una URL de pago.")
         except Exception as e:
             self.show_error(str(e))
-            self.main_window.mostrar_vista_auth() # Volver al login si algo falla
+            self.main_window.mostrar_vista_auth()
 
     def _poll_for_activation(self):
         """Función que el QTimer llamará repetidamente."""
