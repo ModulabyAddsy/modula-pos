@@ -9,6 +9,7 @@ from src.core.local_storage import get_id_terminal, delete_config, save_terminal
 # ✅ CORRECCIÓN: Añadir la importación de ResolverUbicacionDialog
 from src.ui.dialogs import mostrar_dialogo_migracion, ResolverUbicacionDialog, SeleccionarSucursalDialog, RecuperarContrasenaDialog
 import uuid
+import psutil
 
 class AppController:
     """Controla todo el flujo de la aplicación."""
@@ -46,14 +47,28 @@ class AppController:
     
     def _generar_id_estable(self) -> str:
         """
-        Genera un ID único y consistente para la máquina basado en su dirección MAC.
+        Genera un ID único y consistente para la máquina buscando la dirección MAC
+        de la interfaz de red principal (Ethernet o Wi-Fi).
         """
         try:
-            mac_address_int = uuid.getnode()
-            # Creamos un UUID versión 5, que es determinista a partir de un nombre.
-            # Usamos la MAC como "nombre" dentro de un namespace.
-            # Esto asegura que el ID siempre sea el mismo y tenga un formato UUID válido.
-            hardware_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, str(mac_address_int)))
+            # psutil nos da todas las interfaces de red
+            addrs = psutil.net_if_addrs()
+            mac_address = None
+            # Buscamos la primera dirección MAC válida y física
+            for _, interfaces in addrs.items():
+                for interface in interfaces:
+                    if interface.family == psutil.AF_LINK and interface.address and "00:00:00:00:00:00" not in interface.address:
+                        mac_address = interface.address
+                        break
+                if mac_address:
+                    break
+            
+            if not mac_address:
+                # Si no se encuentra una MAC, recurrimos al método anterior como fallback
+                mac_address = uuid.getnode()
+            
+            # Usamos la MAC como base para un UUID determinista
+            hardware_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, str(mac_address)))
             print(f"ID de hardware estable generado: {hardware_id}")
             return hardware_id
         except Exception as e:
@@ -217,11 +232,14 @@ class AppController:
             self.show_error(f"No se pudo registrar la nueva terminal: {e}")
 
     def handle_login_para_resolver_conflicto(self, email: str, password: str):
-        """Función especial que se ejecuta solo cuando hay un conflicto de ubicación."""
+        """
+        Función que se ejecuta después del login para resolver un conflicto de ubicación.
+        """
         try:
-            # Desconectamos esta señal y reconectamos la de login normal para evitar bucles.
+            # Desconectamos esta señal para evitar bucles.
             self.main_window.auth_view.login_solicitado.disconnect(self.handle_login_para_resolver_conflicto)
-            self.main_window.auth_view.login_solicitado.connect(self.handle_login)
+            # Reconectamos la señal de login de activación normal.
+            self.main_window.auth_view.login_solicitado.connect(self.handle_account_login_and_activate)
 
             # Hacemos login para obtener un token válido
             self.api_client.login(email, password)
@@ -230,31 +248,36 @@ class AppController:
             respuesta_conflicto = self.respuesta_conflicto
             self.respuesta_conflicto = None
 
-            # --- Flujo de Migración Sugerida ---
+            # Flujo de Migración Sugerida
             sugerencia = respuesta_conflicto.get("sugerencia_migracion")
             if sugerencia and mostrar_dialogo_migracion(sugerencia["nombre"]):
                 self.api_client.asignar_terminal_a_sucursal(id_terminal_local, sugerencia["id"])
-                QMessageBox.information(self.main_window, "Éxito", "Terminal movida. Vuelve a iniciar la aplicación.")
-                delete_config()
-                self.main_window.mostrar_vista_auth()
+                QMessageBox.information(self.main_window, "Éxito", "La terminal se ha movido de sucursal. Reiniciando verificación...")
+                # Re-ejecutamos el arranque inteligente, que ahora debería ser exitoso
+                self._iniciar_arranque_inteligente()
                 return
 
-            # --- Flujo de Creación o Asignación Manual ---
+            # Flujo de Creación o Asignación Manual
             sucursales = respuesta_conflicto.get("sucursales_existentes", [])
             dialogo = ResolverUbicacionDialog(sucursales, self.main_window)
             
             if dialogo.exec():
                 accion, datos = dialogo.get_resultado()
                 if accion == "crear":
+                    # Este flujo ya es correcto: obtiene un token y va al dashboard.
                     res = self.api_client.crear_sucursal_y_asignar_terminal(id_terminal_local, datos["nombre"])
                     self.api_client.set_auth_token(res["access_token"])
                     self.main_window.mostrar_vista_dashboard()
+                
                 elif accion == "asignar":
+                    # ✅ CORRECCIÓN: Ya no borramos el config ni pedimos login de nuevo.
                     self.api_client.asignar_terminal_a_sucursal(id_terminal_local, datos["id_sucursal"])
-                    QMessageBox.information(self.main_window, "Éxito", "Terminal asignada. Vuelve a iniciar la aplicación.")
-                    delete_config()
-                    self.main_window.mostrar_vista_auth()
+                    QMessageBox.information(self.main_window, "Éxito", "La terminal ha sido asignada a la nueva sucursal. Verificando acceso...")
+                    # Re-ejecutamos el arranque inteligente. Como el backend ya actualizó la IP,
+                    # esta verificación será exitosa y nos llevará al dashboard.
+                    self._iniciar_arranque_inteligente()
             else:
+                # Si el usuario cancela, lo dejamos en la vista de autenticación
                 self.main_window.mostrar_vista_auth()
         except Exception as e:
             self.show_error(f"Error resolviendo conflicto: {e}")
@@ -309,3 +332,7 @@ class AppController:
         
         except Exception as e:
             print(f"Error durante el polling: {e}. Se reintentará...")
+            
+    def show_error(self, message: str):
+        """Muestra un diálogo de error estandarizado."""
+        QMessageBox.critical(self.main_window, "Error", message) 
