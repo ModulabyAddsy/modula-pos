@@ -147,20 +147,47 @@ class AppController:
 
     def handle_account_login_and_activate(self, email: str, password: str):
         """
-        Maneja el login manual. Un login exitoso siempre llevará al flujo
-        de configuración de una nueva terminal.
+        Autentica la CUENTA de Addsy y luego decide si vincular una terminal
+        existente o crear una nueva.
         """
         try:
-            print(f"Intentando iniciar sesión como {email}...")
-            # El login ahora solo nos da el token, no el ID de la terminal.
-            self.api_client.login(email, password) 
+            print(f"Autenticando cuenta Addsy: {email}...")
+            self.api_client.login(email, password)
             
-            # ✅ CORRECCIÓN: Después de un login exitoso, siempre vamos
-            # al flujo para registrar el nuevo dispositivo.
-            self.handle_nueva_terminal()
+            # --- LÓGICA INTELIGENTE DE VINCULACIÓN ---
+            print("Cuenta autenticada. Verificando si esta PC ya está registrada como terminal...")
+            
+            # 1. Obtenemos el ID de hardware de esta PC
+            hardware_id = self._generar_id_estable()
+            
+            # 2. Le preguntamos al backend por todas las terminales de la cuenta
+            terminales_existentes = self.api_client.get_mis_terminales()
+            
+            terminal_ya_registrada = None
+            # 3. Buscamos si el ID de nuestro hardware ya está en la lista
+            for terminal in terminales_existentes:
+                if terminal['id_terminal'] == hardware_id:
+                    terminal_ya_registrada = terminal
+                    break
+            
+            if terminal_ya_registrada:
+                # 4A. ¡Éxito! La terminal ya existe. La vinculamos y reiniciamos.
+                print(f"Este hardware ya está registrado como '{terminal_ya_registrada['nombre_terminal']}'. Vinculando...")
+                save_terminal_id(hardware_id)
+                
+                QMessageBox.information(self.main_window, "Terminal Vinculada",
+                                      "Este equipo ha sido vinculado exitosamente a tu terminal existente.\n\n"
+                                      "La aplicación se reiniciará para aplicar la configuración.")
+                
+                # Reiniciamos el flujo de arranque, que ahora tendrá éxito.
+                self._iniciar_arranque_inteligente()
+            else:
+                # 4B. La terminal es genuinamente nueva. Procedemos a crearla.
+                print("No se encontró una terminal para este hardware. Iniciando flujo de creación.")
+                self.handle_nueva_terminal()
 
         except Exception as e:
-            self.show_error(f"Error de Login: {e}")
+            self.show_error(f"Error en el proceso de activación: {e}")
     
     def handle_nueva_terminal(self):
         """Gestiona el proceso de registrar una nueva terminal tras el login."""
