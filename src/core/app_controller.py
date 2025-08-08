@@ -1,339 +1,278 @@
 # src/core/app_controller.py
 import webbrowser
 import os
-from PySide6.QtWidgets import QMessageBox, QInputDialog
-from PySide6.QtCore import Signal, Qt, QDate, QTimer
-from src.ui.main_window import MainWindow
-from src.core.api_client import ApiClient
-from src.core.local_storage import get_id_terminal, delete_config, save_terminal_id
-# ✅ CORRECCIÓN: Añadir la importación de ResolverUbicacionDialog
-from src.ui.dialogs import mostrar_dialogo_migracion, ResolverUbicacionDialog, SeleccionarSucursalDialog, RecuperarContrasenaDialog
 import uuid
 import psutil
+from PySide6.QtWidgets import QMessageBox, QInputDialog, QApplication
+from PySide6.QtCore import QTimer, QObject, Signal, QThread
+from src.ui.main_window import MainWindow
+from src.core.api_client import ApiClient
+from src.core.local_storage import get_id_terminal, save_terminal_id, get_local_db_file_info,DB_DIR
+from src.ui.dialogs import mostrar_dialogo_migracion, ResolverUbicacionDialog, SeleccionarSucursalDialog, RecuperarContrasenaDialog
 
-class AppController:
-    """Controla todo el flujo de la aplicación."""
-    def __init__(self, app):
-        self.app = app
-        self.api_client = ApiClient()
-        self.main_window = MainWindow()
-        self.respuesta_conflicto = None # Inicializamos la variable de estado
-        self._connect_signals()
-        self.polling_timer = QTimer() # <-- Crea el timer
-        self.polling_timer.timeout.connect(self._poll_for_activation)
-        self.claim_token = None
+class StartupWorker(QObject):
+    """
+    Trabajador que realiza TODA la lógica de arranque en segundo plano para no congelar la UI.
+    Decide si la terminal es válida, necesita recuperación o es nueva.
+    """
+    finished = Signal(object, list) #CAMBIO: La señal ahora emitirá el resultado y una lista de strings (el resumen)
 
-    def _connect_signals(self):
-        """Conecta las señales de las vistas a los manejadores del controlador."""
-        self.main_window.auth_view.login_solicitado.connect(self.handle_account_login_and_activate)
-        self.main_window.auth_view.registro_solicitado.connect(self.handle_register)
-        self.main_window.auth_view.recuperacion_solicitada.connect(self.handle_recovery_request)
-        
-    def handle_recovery_request(self):
-        """Muestra el diálogo para solicitar la recuperación de contraseña."""
-        dialogo = RecuperarContrasenaDialog(self.main_window)
-        if dialogo.exec():
-            email = dialogo.get_email()
-            if not email:
-                self.show_error("El correo no puede estar vacío.")
-                return
-            try:
-                # La función en el api_client la crearemos en el siguiente paso
-                respuesta = self.api_client.solicitar_reseteo_contrasena(email)
-                QMessageBox.information(self.main_window, "Solicitud Enviada",
-                                      respuesta.get("message", "Si el correo está registrado, recibirás un enlace para restablecer tu contraseña."))
-            except Exception as e:
-                self.show_error(str(e))
-    
-    def _generar_id_estable(self) -> str:
-        """
-        Genera un ID único y consistente para la máquina buscando la dirección MAC
-        de la interfaz de red principal (Ethernet o Wi-Fi).
-        """
+    def __init__(self, api_client):
+        super().__init__()
+        self.api_client = api_client
+
+    def run(self):
+        """El trabajo pesado que se ejecuta en el hilo secundario."""
         try:
-            # psutil nos da todas las interfaces de red
+            # --- FASE 1: Verificación de la Terminal (Lógica existente) ---
+            hardware_id = self._generar_id_estable()
+            local_id = get_id_terminal()
+            respuesta_verificacion = None
+
+            if local_id and local_id == hardware_id:
+                respuesta_verificacion = self.api_client.verificar_terminal(local_id)
+            else:
+                try:
+                    self.api_client.buscar_terminal_por_hardware(hardware_id)
+                    save_terminal_id(hardware_id)
+                    respuesta_verificacion = self.api_client.verificar_terminal(hardware_id)
+                except Exception:
+                    self.finished.emit("activacion_requerida", []); return
+
+            if "access_token" not in respuesta_verificacion:
+                self.finished.emit(respuesta_verificacion, []); return
+            
+            self.api_client.set_auth_token(respuesta_verificacion["access_token"])
+
+            # --- FASE 2: Planificación de la Sincronización (Lógica existente) ---
+            print("Verificación exitosa. Planificando sincronización de bases de datos...")
+            id_sucursal = respuesta_verificacion['id_sucursal']
+            id_empresa = respuesta_verificacion['id_empresa']
+            
+            archivos_locales = get_local_db_file_info(id_empresa, id_sucursal)
+            
+            plan_sync = self.api_client.check_sync_status(id_sucursal, archivos_locales)
+            
+            # --- ✅ NUEVO: FASE 3: Ejecución del Plan y Creación de Resumen ---
+            resumen_sync = []
+            print("Ejecutando plan de sincronización...")
+
+            # Ejecutar acciones de esquema (descargar nuevas DBs)
+            for accion in plan_sync.get("schema_actions", []):
+                nombre_archivo = os.path.basename(accion['key_destino'])
+                ruta_local = DB_DIR / nombre_archivo
+                if self.api_client.descargar_archivo(accion['key_origen'], ruta_local):
+                    resumen_sync.append(f"Nueva base de datos '{nombre_archivo}' instalada.")
+
+            # Ejecutar acciones de datos (subir/bajar actualizaciones)
+            for accion in plan_sync.get("data_actions", []):
+                # La 'key' ya es la ruta completa en la nube, la usamos para construir la ruta local
+                nombre_archivo = os.path.basename(accion['key'])
+                ruta_local = DB_DIR / nombre_archivo
+                
+                if accion['accion'] == "descargar_actualizacion":
+                    if self.api_client.descargar_archivo(accion['key'], ruta_local):
+                        resumen_sync.append(f"'{nombre_archivo}' actualizado desde la nube.")
+                elif accion['accion'] == "subir_actualizacion":
+                    if self.api_client.subir_archivo(ruta_local, accion['key']):
+                        resumen_sync.append(f"'{nombre_archivo}' sincronizado con la nube.")
+            
+            if not resumen_sync:
+                resumen_sync.append("Todo está sincronizado.")
+
+            # Emitimos ambos resultados: la verificación y el resumen.
+            self.finished.emit(respuesta_verificacion, resumen_sync)
+
+        except Exception as e:
+            self.finished.emit(str(e), []) # Emitimos un error y un resumen vacío
+
+    def _generar_id_estable(self) -> str:
+        """Genera un ID único y consistente para la máquina."""
+        try:
             addrs = psutil.net_if_addrs()
             mac_address = None
-            # Buscamos la primera dirección MAC válida y física
             for _, interfaces in addrs.items():
                 for interface in interfaces:
                     if interface.family == psutil.AF_LINK and interface.address and "00:00:00:00:00:00" not in interface.address:
-                        mac_address = interface.address
-                        break
-                if mac_address:
-                    break
-            
-            if not mac_address:
-                # Si no se encuentra una MAC, recurrimos al método anterior como fallback
-                mac_address = uuid.getnode()
-            
-            # Usamos la MAC como base para un UUID determinista
-            hardware_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, str(mac_address)))
-            print(f"ID de hardware estable generado: {hardware_id}")
-            return hardware_id
-        except Exception as e:
-            print(f"ADVERTENCIA: No se pudo obtener la dirección MAC. Se usará un UUID aleatorio. Error: {e}")
+                        mac_address = interface.address; break
+                if mac_address: break
+            if not mac_address: mac_address = uuid.getnode()
+            return str(uuid.uuid5(uuid.NAMESPACE_DNS, str(mac_address)))
+        except:
             return str(uuid.uuid4())
 
+class AppController(QObject):
+    """Controla todo el flujo de la aplicación."""
+    def __init__(self, app):
+        super().__init__()
+        self.app = app
+        self.api_client = ApiClient()
+        self.main_window = MainWindow()
+        self.worker_thread = None # Se inicializa a None
+        self.respuesta_conflicto = None
+        self.claim_token = None
+        self.polling_timer = QTimer()
+        self.polling_timer.timeout.connect(self._poll_for_activation)
+        self._connect_signals()
+
+    def _connect_signals(self):
+        self.main_window.auth_view.registro_solicitado.connect(self.handle_register)
+        self.main_window.auth_view.recuperacion_solicitada.connect(self.handle_recovery_request)
+
     def run(self):
-        """Punto de entrada: Muestra la ventana e inicia el arranque inteligente."""
         self.main_window.show()
         self._iniciar_arranque_inteligente()
 
     def _iniciar_arranque_inteligente(self):
-        """
-        Nuevo flujo de arranque: La terminal siempre sabe quién es.
-        """
+        """Inicia el 'worker' de arranque en un hilo secundario."""
         self.main_window.mostrar_vista_carga()
         
-        # 1. La app siempre genera primero su ID de hardware estable.
-        hardware_id = self._generar_id_estable()
+        self.thread = QThread()
+        self.worker = StartupWorker(self.api_client)
+        self.worker.moveToThread(self.thread)
+
+        # Conexiones clave para el funcionamiento correcto de hilos
+        self.thread.started.connect(self.worker.run)
+        self.worker.finished.connect(self.handle_startup_result)
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
         
-        # 2. Revisa si el archivo local existe y coincide.
-        local_id = get_id_terminal()
+        self.thread.start()
 
-        if local_id and local_id == hardware_id:
-            # 2A. El archivo local es correcto, procedemos con la verificación normal.
-            print(f"Archivo local encontrado y válido. Verificando terminal ID: {hardware_id}...")
-            respuesta = self.api_client.verificar_terminal(hardware_id)
-            self._manejar_respuesta_verificacion(respuesta)
-        else:
-            # 2B. No hay archivo local o no coincide. La app debe recuperar su identidad.
-            print("Archivo local no encontrado o inválido. Intentando recuperar identidad desde el backend...")
-            try:
-                # 3. Preguntamos al backend si conoce este hardware.
-                respuesta = self.api_client.buscar_terminal_por_hardware(hardware_id)
-                
-                # 4. Si el backend la encuentra, re-creamos el archivo local.
-                print("¡Identidad recuperada! El backend reconoce esta terminal.")
-                save_terminal_id(hardware_id)
-                
-                # 5. Ahora que tenemos el archivo, re-intentamos el arranque inteligente.
-                self._iniciar_arranque_inteligente()
-                
-            except Exception as e:
-                # 6. Si el backend no la encuentra (404), es una terminal genuinamente nueva.
-                print("El backend no reconoce este hardware. Es una terminal nueva.")
-                self.main_window.auth_view.login_solicitado.connect(self.handle_account_login_and_activate)
+    def handle_startup_result(self, result, resumen_sync):
+        """
+        Manejador central para el resultado del worker de arranque.
+        Muestra el resumen y LUEGO continúa con el flujo normal.
+        """
+        self.main_window.hide()
+
+        # Primero, mostramos el resumen de la sincronización si la lista no está vacía
+        if resumen_sync:
+            mensaje_sync = "\n".join(f"- {s}" for s in resumen_sync)
+            QMessageBox.information(self.main_window, "Sincronización Completada",
+                                  f"Resumen de sincronización:\n{mensaje_sync}")
+
+        # ✅ CORRECCIÓN: Esta lógica ahora se ejecuta SIEMPRE,
+        # después de que el usuario cierra el diálogo de resumen.
+        if isinstance(result, str):
+            if result == "activacion_requerida":
+                self.solicitar_login_activacion()
+            else:
+                self.show_error(f"Error en el arranque: {result}")
                 self.main_window.mostrar_vista_auth()
+        
+        elif isinstance(result, dict):
+            # Esta llamada es la que te llevará al dashboard o al login de conflicto.
+            # Ahora se ejecuta correctamente sin importar si hubo resumen o no.
+            self._manejar_respuesta_verificacion(result)
 
-    def _manejar_respuesta_verificacion(self, respuesta: dict):
-        """
-        Analiza la respuesta de la verificación. YA NO BORRA EL ARCHIVO LOCAL.
-        """
-        if respuesta.get("status") == "ok" and "access_token" in respuesta:
-            print("Verificación exitosa. Iniciando sesión automáticamente.")
-            self.api_client.set_auth_token(respuesta["access_token"])
-            self.main_window.mostrar_vista_dashboard()
-            return
-
-        if respuesta.get("status") == "location_mismatch":
-            print("Conflicto de ubicación detectado. Se requiere login para resolver.")
-            # ✅ CORRECCIÓN CRÍTICA: Ya no borramos el archivo.
-            QMessageBox.warning(self.main_window, "Conflicto de Ubicación",
-                                  "Hemos detectado que estás en una nueva ubicación.\n\n"
-                                  "Por favor, inicia sesión con tu cuenta para autorizar este cambio.")
-            
-            self.respuesta_conflicto = respuesta
-            self.main_window.auth_view.login_solicitado.disconnect()
-            self.main_window.auth_view.login_solicitado.connect(self.handle_login_para_resolver_conflicto)
-            self.main_window.mostrar_vista_auth()
-            return
-
-        # Para cualquier otro error (ej. terminal desactivada), mostramos el login.
-        error_detail = respuesta.get("detail", "Error desconocido.")
-        print(f"Fallo en verificación: {error_detail}.")
+    def solicitar_login_activacion(self):
+        """Configura la UI para el login de activación de cuenta Addsy."""
+        try: self.main_window.auth_view.login_solicitado.disconnect() 
+        except RuntimeError: pass
+        self.main_window.auth_view.login_solicitado.connect(self.handle_account_login_and_activate)
         self.main_window.mostrar_vista_auth()
 
+    def _manejar_respuesta_verificacion(self, respuesta: dict):
+        """Analiza la respuesta de una verificación."""
+        if respuesta.get("status") == "ok" and "access_token" in respuesta:
+            self.api_client.set_auth_token(respuesta["access_token"])
+            self.main_window.mostrar_vista_dashboard()
+        elif respuesta.get("status") == "location_mismatch":
+            QMessageBox.warning(self.main_window, "Conflicto de Ubicación",
+                                  "Hemos detectado que estás en una nueva ubicación.\n\n"
+                                  "Por favor, inicia sesión para autorizar este cambio.")
+            self.respuesta_conflicto = respuesta
+            try: self.main_window.auth_view.login_solicitado.disconnect()
+            except RuntimeError: pass
+            self.main_window.auth_view.login_solicitado.connect(self.handle_login_para_resolver_conflicto)
+            self.main_window.mostrar_vista_auth()
+        else:
+            self.show_error(f"Fallo en verificación: {respuesta.get('detail', 'Error desconocido.')}")
+            self.main_window.mostrar_vista_auth()
+
     def handle_account_login_and_activate(self, email: str, password: str):
-        """
-        Autentica la CUENTA de Addsy y luego decide si vincular una terminal
-        existente o crear una nueva.
-        """
+        """Autentica la CUENTA de Addsy y decide si vincular o crear una terminal."""
         try:
-            print(f"Autenticando cuenta Addsy: {email}...")
             self.api_client.login(email, password)
-            
-            # --- LÓGICA INTELIGENTE DE VINCULACIÓN ---
-            print("Cuenta autenticada. Verificando si esta PC ya está registrada como terminal...")
-            
-            # 1. Obtenemos el ID de hardware de esta PC
-            hardware_id = self._generar_id_estable()
-            
-            # 2. Le preguntamos al backend por todas las terminales de la cuenta
-            terminales_existentes = self.api_client.get_mis_terminales()
-            
-            terminal_ya_registrada = None
-            # 3. Buscamos si el ID de nuestro hardware ya está en la lista
-            for terminal in terminales_existentes:
-                if terminal['id_terminal'] == hardware_id:
-                    terminal_ya_registrada = terminal
-                    break
-            
-            if terminal_ya_registrada:
-                # 4A. ¡Éxito! La terminal ya existe. La vinculamos y reiniciamos.
-                print(f"Este hardware ya está registrado como '{terminal_ya_registrada['nombre_terminal']}'. Vinculando...")
-                save_terminal_id(hardware_id)
-                
-                QMessageBox.information(self.main_window, "Terminal Vinculada",
-                                      "Este equipo ha sido vinculado exitosamente a tu terminal existente.\n\n"
-                                      "La aplicación se reiniciará para aplicar la configuración.")
-                
-                # Reiniciamos el flujo de arranque, que ahora tendrá éxito.
-                self._iniciar_arranque_inteligente()
-            else:
-                # 4B. La terminal es genuinamente nueva. Procedemos a crearla.
-                print("No se encontró una terminal para este hardware. Iniciando flujo de creación.")
-                self.handle_nueva_terminal()
-
+            self.handle_nueva_terminal()
         except Exception as e:
-            self.show_error(f"Error en el proceso de activación: {e}")
-    
+            self.show_error(f"Error de Autenticación: {e}")
+
     def handle_nueva_terminal(self):
-        """Gestiona el proceso de registrar una nueva terminal tras el login."""
+        """Gestiona el proceso de registrar una nueva terminal en el backend."""
         try:
-            # 1. Preguntar al usuario y advertir del costo
-            msg = (
-                "<h3>Registrar Nueva Terminal</h3>"
-                "<p>Hemos detectado que estás iniciando sesión desde un dispositivo no registrado.</p>"
-                "<p>¿Deseas añadir este equipo como una nueva terminal en tu cuenta?</p>"
-                "<p><b>Nota:</b> Se aplicará un cargo adicional recurrente de $50 MXN/mes a tu suscripción.</p>"
-            )
-            respuesta = QMessageBox.question(self.main_window, "Nueva Terminal Detectada", msg,
-                                             QMessageBox.Yes | QMessageBox.No)
+            msg = ("<h3>Registrar Nueva Terminal</h3>"
+                   "<p>¿Deseas añadir este equipo como una nueva terminal en tu cuenta?</p>"
+                   "<p><b>Nota:</b> Se aplicará un cargo adicional recurrente de $50 MXN/mes.</p>")
+            if QMessageBox.question(self.main_window, "Nueva Terminal", msg) == QMessageBox.No: return
 
-            if respuesta == QMessageBox.No:
-                QMessageBox.information(self.main_window, "Acción Cancelada", "El registro de la terminal ha sido cancelado.")
-                return
-
-            # 2. Obtener la lista de sucursales
             sucursales = self.api_client.get_mis_sucursales()
             id_sucursal_seleccionada = None
-
-            if len(sucursales) == 1:
+            if not sucursales:
+                self.show_error("No se encontraron sucursales.")
+                return
+            elif len(sucursales) == 1:
                 id_sucursal_seleccionada = sucursales[0]["id"]
-                QMessageBox.information(self.main_window, "Sucursal Asignada", 
-                                      f"La nueva terminal será asignada automáticamente a tu única sucursal: '{sucursales[0]['nombre']}'.")
             else:
                 dialogo = SeleccionarSucursalDialog(sucursales, self.main_window)
                 if dialogo.exec():
                     id_sucursal_seleccionada = dialogo.get_selected_sucursal_id()
-                else:
-                    QMessageBox.information(self.main_window, "Acción Cancelada", "No se seleccionó una sucursal.")
-                    return
+                else: return
 
-            # 3. Pedir un nombre para la nueva terminal
-            nombre_terminal, ok = QInputDialog.getText(self.main_window, "Nombre de la Terminal", 
-                                                       "Ingresa un nombre para identificar esta terminal (ej. 'Caja 2'):")
-            if not ok or not nombre_terminal.strip():
-                QMessageBox.warning(self.main_window, "Acción Cancelada", "El nombre de la terminal no puede estar vacío.")
-                return
-            
-            # ✅ CORRECCIÓN: Generar un ID estable basado en el hardware (dirección MAC)
-            try:
-                # uuid.getnode() obtiene la dirección MAC como un número entero
-                mac_address_int = uuid.getnode()
-                # Creamos un UUID a partir de ese número. Siempre será el mismo en esta PC.
-                nuevo_id_terminal = str(uuid.UUID(int=mac_address_int))
-                print(f"ID de hardware generado: {nuevo_id_terminal}")
-            except Exception as e:
-                # Fallback por si no se puede obtener la MAC (muy raro)
-                print(f"No se pudo obtener MAC, generando UUID aleatorio como fallback. Error: {e}")
-                nuevo_id_terminal = str(uuid.uuid4())
+            nombre_terminal, ok = QInputDialog.getText(self.main_window, "Nombre", "Nombre para esta terminal:")
+            if not ok or not nombre_terminal.strip(): return
 
-            # 4. Crear la nueva terminal en el backend
-            datos_terminal = {
-                "id_terminal": nuevo_id_terminal,
-                "nombre_terminal": nombre_terminal.strip(),
-                "id_sucursal": id_sucursal_seleccionada
-            }
-            
-            self.api_client.registrar_nueva_terminal(datos_terminal)
-            
-            # 5. Guardar localmente y proceder al dashboard
-            save_terminal_id(nuevo_id_terminal)
-            QMessageBox.information(self.main_window, "¡Éxito!", "La nueva terminal ha sido registrada y configurada.")
-            self.main_window.mostrar_vista_dashboard()
-
+            hardware_id = self._generar_id_estable()
+            datos = {"id_terminal": hardware_id, "nombre_terminal": nombre_terminal.strip(), "id_sucursal": id_sucursal_seleccionada}
+            self.api_client.registrar_nueva_terminal(datos)
+            save_terminal_id(hardware_id)
+            QMessageBox.information(self.main_window, "¡Éxito!", "Terminal registrada. Reiniciando...")
+            self._iniciar_arranque_inteligente()
         except Exception as e:
             self.show_error(f"No se pudo registrar la nueva terminal: {e}")
 
     def handle_login_para_resolver_conflicto(self, email: str, password: str):
-        """
-        Función que se ejecuta después del login para resolver un conflicto de ubicación.
-        """
         try:
-            # Desconectamos esta señal para evitar bucles.
-            self.main_window.auth_view.login_solicitado.disconnect(self.handle_login_para_resolver_conflicto)
-            # Reconectamos la señal de login de activación normal.
-            self.main_window.auth_view.login_solicitado.connect(self.handle_account_login_and_activate)
-
-            # Hacemos login para obtener un token válido
             self.api_client.login(email, password)
             id_terminal_local = get_id_terminal()
-
             respuesta_conflicto = self.respuesta_conflicto
             self.respuesta_conflicto = None
-
-            # Flujo de Migración Sugerida
             sugerencia = respuesta_conflicto.get("sugerencia_migracion")
             if sugerencia and mostrar_dialogo_migracion(sugerencia["nombre"]):
                 self.api_client.asignar_terminal_a_sucursal(id_terminal_local, sugerencia["id"])
-                QMessageBox.information(self.main_window, "Éxito", "La terminal se ha movido de sucursal. Reiniciando verificación...")
-                # Re-ejecutamos el arranque inteligente, que ahora debería ser exitoso
+                QMessageBox.information(self.main_window, "Éxito", "Terminal movida. Reiniciando verificación...")
                 self._iniciar_arranque_inteligente()
                 return
-
-            # Flujo de Creación o Asignación Manual
             sucursales = respuesta_conflicto.get("sucursales_existentes", [])
             dialogo = ResolverUbicacionDialog(sucursales, self.main_window)
-            
             if dialogo.exec():
                 accion, datos = dialogo.get_resultado()
                 if accion == "crear":
-                    # Este flujo ya es correcto: obtiene un token y va al dashboard.
                     res = self.api_client.crear_sucursal_y_asignar_terminal(id_terminal_local, datos["nombre"])
                     self.api_client.set_auth_token(res["access_token"])
                     self.main_window.mostrar_vista_dashboard()
-                
                 elif accion == "asignar":
-                    # ✅ CORRECCIÓN: Ya no borramos el config ni pedimos login de nuevo.
                     self.api_client.asignar_terminal_a_sucursal(id_terminal_local, datos["id_sucursal"])
-                    QMessageBox.information(self.main_window, "Éxito", "La terminal ha sido asignada a la nueva sucursal. Verificando acceso...")
-                    # Re-ejecutamos el arranque inteligente. Como el backend ya actualizó la IP,
-                    # esta verificación será exitosa y nos llevará al dashboard.
+                    QMessageBox.information(self.main_window, "Éxito", "Terminal asignada. Verificando acceso...")
                     self._iniciar_arranque_inteligente()
             else:
-                # Si el usuario cancela, lo dejamos en la vista de autenticación
                 self.main_window.mostrar_vista_auth()
         except Exception as e:
             self.show_error(f"Error resolviendo conflicto: {e}")
-            self.main_window.mostrar_vista_auth()
 
     def handle_register(self, user_data: dict):
-        """
-        Inicia el nuevo flujo de registro con polling.
-        """
         try:
-            # ✅ CORRECCIÓN: Generar el ID de hardware aquí y añadirlo a los datos
             hardware_id = self._generar_id_estable()
             user_data["id_terminal"] = hardware_id
-            
             self.claim_token = str(uuid.uuid4())
             user_data["claim_token"] = self.claim_token
-            
             respuesta = self.api_client.registrar_cuenta(user_data)
-            
             url_checkout = respuesta.get("url_checkout")
             if url_checkout:
                 webbrowser.open(url_checkout)
-                
-                self.main_window.mostrar_vista_carga()
-                # La clase LoadingView necesita un método set_message para esto
-                self.main_window.loading_view.set_message(
-                    "Esperando activación de la cuenta...",
-                    "Por favor, completa el pago y la verificación por correo en tu navegador."
-                )
+                self.main_window.loading_view.set_message("Esperando activación...", "Completa el pago y la verificación en tu navegador.")
                 self.polling_timer.start(5000)
             else:
                 self.show_error("El servidor no devolvió una URL de pago.")
@@ -342,26 +281,31 @@ class AppController:
             self.main_window.mostrar_vista_auth()
 
     def _poll_for_activation(self):
-        """Función que el QTimer llamará repetidamente."""
         print("Polling para verificar activación...")
         try:
             respuesta = self.api_client.check_activation_status(self.claim_token)
-            
             if respuesta.get("status") == "complete":
                 print("¡Activación completada!")
                 self.polling_timer.stop()
-                
-                # Auto-login
                 self.api_client.set_auth_token(respuesta["access_token"])
                 save_terminal_id(respuesta["id_terminal"])
-                
-                QMessageBox.information(self.main_window, "¡Cuenta Activada!", 
-                                      "Tu cuenta y tu primera terminal han sido configuradas exitosamente.")
+                QMessageBox.information(self.main_window, "¡Cuenta Activada!", "Tu cuenta y terminal han sido configuradas.")
                 self.main_window.mostrar_vista_dashboard()
-        
         except Exception as e:
             print(f"Error durante el polling: {e}. Se reintentará...")
-            
+
+    def handle_recovery_request(self):
+        dialogo = RecuperarContrasenaDialog(self.main_window)
+        if dialogo.exec():
+            email = dialogo.get_email()
+            if not email:
+                self.show_error("El correo no puede estar vacío.")
+                return
+            try:
+                respuesta = self.api_client.solicitar_reseteo_contrasena(email)
+                QMessageBox.information(self.main_window, "Solicitud Enviada", respuesta.get("message", "Si el correo está registrado, recibirás un enlace."))
+            except Exception as e:
+                self.show_error(str(e))
+
     def show_error(self, message: str):
-        """Muestra un diálogo de error estandarizado."""
-        QMessageBox.critical(self.main_window, "Error", message) 
+        QMessageBox.critical(self.main_window, "Error", message)

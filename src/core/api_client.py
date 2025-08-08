@@ -1,6 +1,7 @@
 # src/core/api_client.py
 import httpx
 import os
+from pathlib import Path
 
 class ApiClient:
     """Gestiona toda la comunicación con el backend de Modula."""
@@ -209,4 +210,67 @@ class ApiClient:
             return response.json()
         except Exception as e:
             raise Exception(f"Error al solicitar reseteo: {e}")
+    
+    # --- ✅ NUEVOS MÉTODOS PARA SINCRONIZACIÓN ---
 
+    def check_sync_status(self, id_sucursal: int, archivos_locales: list) -> dict:
+        """
+        Envía el estado de los archivos locales al backend y recibe un plan de sincronización.
+        """
+        if not self.auth_token:
+            raise Exception("Se requiere autenticación para la sincronización.")
+        
+        url = f"{self.base_url}/sync/check"
+        headers = {"Authorization": f"Bearer {self.auth_token}"}
+        
+        payload_archivos = [
+            {"key": f["key"], "last_modified": f["last_modified"]}
+            for f in archivos_locales
+        ]
+        
+        payload = {
+            "id_sucursal_actual": id_sucursal,
+            "archivos_locales": payload_archivos
+        }
+        
+        try:
+            with httpx.Client() as client:
+                response = client.post(url, headers=headers, json=payload, timeout=30.0)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            raise Exception(f"Error al verificar estado de sincronización: {e}")
+
+    def descargar_archivo(self, key_en_la_nube: str, ruta_local_destino: Path):
+        """Descarga un archivo específico desde la nube y lo guarda localmente."""
+        if not self.auth_token: raise Exception("Se requiere autenticación para descargar.")
+        url = f"{self.base_url}/sync/download/{key_en_la_nube}"
+        headers = {"Authorization": f"Bearer {self.auth_token}"}
+        try:
+            with httpx.stream("GET", url, headers=headers, timeout=60.0) as response:
+                response.raise_for_status()
+                with open(ruta_local_destino, "wb") as f:
+                    for chunk in response.iter_bytes():
+                        f.write(chunk)
+            print(f"✅ Descarga completa: {key_en_la_nube}")
+            return True
+        except Exception as e:
+            print(f"❌ Error al descargar {key_en_la_nube}: {e}")
+            return False
+
+    def subir_archivo(self, ruta_local_origen: Path, key_en_la_nube: str):
+        """Sube un archivo local a una ruta específica en la nube."""
+        if not self.auth_token: raise Exception("Se requiere autenticación.")
+        url = f"{self.base_url}/sync/upload/{key_en_la_nube}"
+        headers = {"Authorization": f"Bearer {self.auth_token}"}
+        try:
+            with open(ruta_local_origen, "rb") as f:
+                files = {'file': (ruta_local_origen.name, f, 'application/x-sqlite3')}
+                with httpx.Client() as client:
+                    response = client.post(url, headers=headers, files=files, timeout=60.0)
+                response.raise_for_status()
+            print(f"✅ Subida completa: {ruta_local_origen.name}")
+            return True
+        except Exception as e:
+            print(f"❌ Error al subir {ruta_local_origen.name}: {e}")
+            return False

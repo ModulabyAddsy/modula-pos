@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+from datetime import datetime, timezone
 
 # --- RUTA DE CONFIGURACIÓN ESTÁNDAR ---
 # Se define una única ubicación para el archivo de configuración.
@@ -10,6 +11,8 @@ from pathlib import Path
 # La ruta final será algo como: C:\Users\TuUsuario\AppData\Roaming\Modula\modula_config.json
 CONFIG_DIR = Path(os.getenv('APPDATA')) / "Modula"
 CONFIG_FILE = CONFIG_DIR / "modula_config.json"
+# ✅ NUEVO: Definir el directorio para las bases de datos locales
+DB_DIR = CONFIG_DIR / "Databases"
 
 def _ensure_config_dir_exists():
     """
@@ -63,3 +66,44 @@ def delete_config():
             print("🗑️ Archivo de configuración local eliminado.")
     except OSError as e:
         print(f"❌ Error al borrar el archivo de configuración: {e}")
+
+
+# ✅ NUEVA FUNCIÓN: Para escanear los archivos de base de datos locales
+def get_local_db_file_info(id_empresa: str, id_sucursal: int) -> list:
+    """
+    Escanea el directorio de bases de datos locales y devuelve una lista con
+    la información que el backend necesita para la comparación.
+    """
+    file_info_list = []
+    
+    # Asegurarse de que el directorio de bases de datos exista
+    DB_DIR.mkdir(parents=True, exist_ok=True)
+    
+    # Directorios en la nube
+    ruta_cloud_generales = f"{id_empresa}/databases_generales/"
+    ruta_cloud_sucursal = f"{id_empresa}/suc_{id_sucursal}/"
+
+    for filename in os.listdir(DB_DIR):
+        if filename.endswith(".sqlite"):
+            file_path = DB_DIR / filename
+            try:
+                mtime_ts = os.path.getmtime(file_path)
+                mtime_dt_utc = datetime.fromtimestamp(mtime_ts, tz=timezone.utc)
+                
+                # Inteligencia para construir la 'key' correcta de la nube
+                # (Asumimos que el nombre del archivo nos dice a qué carpeta pertenece)
+                # Esta lógica se puede hacer más robusta en el futuro.
+                key_en_la_nube = ""
+                if filename in ["usuarios.sqlite", "clientes.sqlite", "productos_servicios.sqlite"]:
+                    key_en_la_nube = f"{ruta_cloud_generales}{filename}"
+                else: # Asumimos que es un archivo de sucursal
+                    key_en_la_nube = f"{ruta_cloud_sucursal}{filename}"
+                
+                file_info_list.append({
+                    "key": key_en_la_nube,
+                    "last_modified": mtime_dt_utc.isoformat()
+                })
+            except Exception as e:
+                print(f"⚠️  No se pudo leer la información del archivo local {filename}: {e}")
+                
+    return file_info_list
