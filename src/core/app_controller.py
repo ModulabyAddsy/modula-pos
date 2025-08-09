@@ -10,12 +10,16 @@ from src.core.api_client import ApiClient
 from src.core.local_storage import get_id_terminal, save_terminal_id, get_local_db_file_info,DB_DIR
 from src.ui.dialogs import mostrar_dialogo_migracion, ResolverUbicacionDialog, SeleccionarSucursalDialog, RecuperarContrasenaDialog
 
+# ======================================================================
+#  WORKER CON LA LÓGICA DE LA SEÑAL DE PROGRESO
+# ======================================================================
 class StartupWorker(QObject):
     """
-    Trabajador que realiza TODA la lógica de arranque en segundo plano para no congelar la UI.
-    Decide si la terminal es válida, necesita recuperación o es nueva.
+    Trabajador que realiza TODA la lógica de arranque en segundo plano.
+    Ahora también emite señales de progreso.
     """
-    finished = Signal(object, list) #CAMBIO: La señal ahora emitirá el resultado y una lista de strings (el resumen)
+    finished = Signal(object) # Ya no necesitamos enviar el resumen aquí
+    progress_updated = Signal(str) # ✅ SEÑAL PARA EL LOG EN VIVO
 
     def __init__(self, api_client):
         super().__init__()
@@ -23,8 +27,10 @@ class StartupWorker(QObject):
 
     def run(self):
         """El trabajo pesado que se ejecuta en el hilo secundario."""
+        print("✅ ¡WORKER INICIADO! El hilo está funcionando.")
         try:
-            # --- FASE 1: Verificación de la Terminal (Lógica existente) ---
+            # --- FASE 1: Verificación de la Terminal ---
+            self.progress_updated.emit("Verificando identidad de la terminal...")
             hardware_id = self._generar_id_estable()
             local_id = get_id_terminal()
             respuesta_verificacion = None
@@ -37,57 +43,49 @@ class StartupWorker(QObject):
                     save_terminal_id(hardware_id)
                     respuesta_verificacion = self.api_client.verificar_terminal(hardware_id)
                 except Exception:
-                    self.finished.emit("activacion_requerida", []); return
+                    self.finished.emit("activacion_requerida"); return
 
             if "access_token" not in respuesta_verificacion:
-                self.finished.emit(respuesta_verificacion, []); return
+                self.finished.emit(respuesta_verificacion); return
             
             self.api_client.set_auth_token(respuesta_verificacion["access_token"])
 
-            # --- FASE 2: Planificación de la Sincronización (Lógica existente) ---
-            print("Verificación exitosa. Planificando sincronización de bases de datos...")
+            # --- FASE 2: Planificación de la Sincronización ---
+            self.progress_updated.emit("Buscando actualizaciones...")
             id_sucursal = respuesta_verificacion['id_sucursal']
             id_empresa = respuesta_verificacion['id_empresa']
-            
             archivos_locales = get_local_db_file_info(id_empresa, id_sucursal)
-            
             plan_sync = self.api_client.check_sync_status(id_sucursal, archivos_locales)
             
-            # --- ✅ NUEVO: FASE 3: Ejecución del Plan y Creación de Resumen ---
-            resumen_sync = []
-            print("Ejecutando plan de sincronización...")
+            # --- FASE 3: Ejecución del Plan y Emisión de Señales ---
+            if not plan_sync.get("schema_actions") and not plan_sync.get("data_actions"):
+                self.progress_updated.emit("Todo está sincronizado.")
+            else:
+                self.progress_updated.emit("Iniciando sincronización...")
 
-            # Ejecutar acciones de esquema (descargar nuevas DBs)
+            # Ejecutar acciones de esquema
             for accion in plan_sync.get("schema_actions", []):
                 nombre_archivo = os.path.basename(accion['key_destino'])
-                ruta_local = DB_DIR / nombre_archivo
-                if self.api_client.descargar_archivo(accion['key_origen'], ruta_local):
-                    resumen_sync.append(f"Nueva base de datos '{nombre_archivo}' instalada.")
+                self.progress_updated.emit(f"Instalando: {nombre_archivo}...")
+                self.api_client.descargar_archivo(accion['key_origen'], DB_DIR / nombre_archivo)
 
-            # Ejecutar acciones de datos (subir/bajar actualizaciones)
+            # Ejecutar acciones de datos
             for accion in plan_sync.get("data_actions", []):
-                # La 'key' ya es la ruta completa en la nube, la usamos para construir la ruta local
                 nombre_archivo = os.path.basename(accion['key'])
                 ruta_local = DB_DIR / nombre_archivo
-                
                 if accion['accion'] == "descargar_actualizacion":
-                    if self.api_client.descargar_archivo(accion['key'], ruta_local):
-                        resumen_sync.append(f"'{nombre_archivo}' actualizado desde la nube.")
-                elif accion['accion'] == "subir_actualizacion":
-                    if self.api_client.subir_archivo(ruta_local, accion['key']):
-                        resumen_sync.append(f"'{nombre_archivo}' sincronizado con la nube.")
+                    self.progress_updated.emit(f"Descargando: {nombre_archivo}...")
+                    self.api_client.descargar_archivo(accion['key'], ruta_local)
             
-            if not resumen_sync:
-                resumen_sync.append("Todo está sincronizado.")
-
-            # Emitimos ambos resultados: la verificación y el resumen.
-            self.finished.emit(respuesta_verificacion, resumen_sync)
+            self.progress_updated.emit("¡Sincronización completa!")
+            # Al terminar, emitimos el resultado final de la verificación
+            self.finished.emit(respuesta_verificacion)
 
         except Exception as e:
-            self.finished.emit(str(e), []) # Emitimos un error y un resumen vacío
+            self.finished.emit(str(e))
 
     def _generar_id_estable(self) -> str:
-        """Genera un ID único y consistente para la máquina."""
+        # ... (este método no cambia) ...
         try:
             addrs = psutil.net_if_addrs()
             mac_address = None
@@ -101,6 +99,9 @@ class StartupWorker(QObject):
         except:
             return str(uuid.uuid4())
 
+# ======================================================================
+#  CONTROLADOR CON LA LÓGICA DE CONEXIÓN DE SEÑALES
+# ======================================================================
 class AppController(QObject):
     """Controla todo el flujo de la aplicación."""
     def __init__(self, app):
@@ -108,12 +109,14 @@ class AppController(QObject):
         self.app = app
         self.api_client = ApiClient()
         self.main_window = MainWindow()
-        self.worker_thread = None # Se inicializa a None
+        self.thread = None # Renombrado de worker_thread para claridad
+        # ... (resto de atributos no cambian) ...
         self.respuesta_conflicto = None
         self.claim_token = None
         self.polling_timer = QTimer()
         self.polling_timer.timeout.connect(self._poll_for_activation)
         self._connect_signals()
+
 
     def _connect_signals(self):
         self.main_window.auth_view.registro_solicitado.connect(self.handle_register)
@@ -128,33 +131,30 @@ class AppController(QObject):
         self.main_window.mostrar_vista_carga()
         
         self.thread = QThread()
-        self.worker = StartupWorker(self.api_client)
+        # ✅ CAMBIO: Convertimos 'worker' en un atributo de instancia 'self.worker'
+        self.worker = StartupWorker(self.api_client) 
         self.worker.moveToThread(self.thread)
 
-        # Conexiones clave para el funcionamiento correcto de hilos
+        # ✅ CAMBIO: Usamos self.worker en todas las conexiones
         self.thread.started.connect(self.worker.run)
+        self.worker.progress_updated.connect(self.main_window.loading_view.update_log_message)
         self.worker.finished.connect(self.handle_startup_result)
+        
+        # Limpieza del hilo
         self.worker.finished.connect(self.thread.quit)
-        self.worker.finished.connect(self.worker.deleteLater)
+        # ✅ CAMBIO: Usamos self.worker aquí también
+        self.worker.finished.connect(self.worker.deleteLater) 
         self.thread.finished.connect(self.thread.deleteLater)
         
         self.thread.start()
 
-    def handle_startup_result(self, result, resumen_sync):
+    def handle_startup_result(self, result):
         """
-        Manejador central para el resultado del worker de arranque.
-        Muestra el resumen y LUEGO continúa con el flujo normal.
+        Manejador final. Se ejecuta después de que el worker termina.
+        Ya no necesita mostrar el QMessageBox.
         """
         self.main_window.hide()
 
-        # Primero, mostramos el resumen de la sincronización si la lista no está vacía
-        if resumen_sync:
-            mensaje_sync = "\n".join(f"- {s}" for s in resumen_sync)
-            QMessageBox.information(self.main_window, "Sincronización Completada",
-                                  f"Resumen de sincronización:\n{mensaje_sync}")
-
-        # ✅ CORRECCIÓN: Esta lógica ahora se ejecuta SIEMPRE,
-        # después de que el usuario cierra el diálogo de resumen.
         if isinstance(result, str):
             if result == "activacion_requerida":
                 self.solicitar_login_activacion()
@@ -163,22 +163,23 @@ class AppController(QObject):
                 self.main_window.mostrar_vista_auth()
         
         elif isinstance(result, dict):
-            # Esta llamada es la que te llevará al dashboard o al login de conflicto.
-            # Ahora se ejecuta correctamente sin importar si hubo resumen o no.
             self._manejar_respuesta_verificacion(result)
-
+            
+    # --- RESTO DE MÉTODOS DE APPCONTROLLER (no cambian) ---
     def solicitar_login_activacion(self):
         """Configura la UI para el login de activación de cuenta Addsy."""
         try: self.main_window.auth_view.login_solicitado.disconnect() 
         except RuntimeError: pass
         self.main_window.auth_view.login_solicitado.connect(self.handle_account_login_and_activate)
         self.main_window.mostrar_vista_auth()
+        self.main_window.show()
 
     def _manejar_respuesta_verificacion(self, respuesta: dict):
         """Analiza la respuesta de una verificación."""
         if respuesta.get("status") == "ok" and "access_token" in respuesta:
             self.api_client.set_auth_token(respuesta["access_token"])
             self.main_window.mostrar_vista_dashboard()
+            self.main_window.show()
         elif respuesta.get("status") == "location_mismatch":
             QMessageBox.warning(self.main_window, "Conflicto de Ubicación",
                                   "Hemos detectado que estás en una nueva ubicación.\n\n"
@@ -188,9 +189,11 @@ class AppController(QObject):
             except RuntimeError: pass
             self.main_window.auth_view.login_solicitado.connect(self.handle_login_para_resolver_conflicto)
             self.main_window.mostrar_vista_auth()
+            self.main_window.show()
         else:
             self.show_error(f"Fallo en verificación: {respuesta.get('detail', 'Error desconocido.')}")
             self.main_window.mostrar_vista_auth()
+            self.main_window.show()
 
     def handle_account_login_and_activate(self, email: str, password: str):
         """Autentica la CUENTA de Addsy y decide si vincular o crear una terminal."""

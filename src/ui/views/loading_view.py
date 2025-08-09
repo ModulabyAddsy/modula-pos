@@ -37,3 +37,7 @@ class LoadingView(QWidget):
     def set_message(self, title, subtitle=""):
         self.label.setText(title)
         # Puedes añadir un segundo label para el subtítulo si quieres
+        
+    def update_log_message(self, message: str):
+        """Actualiza la etiqueta de estado con mensajes del proceso de carga."""
+        self.label.setText(message)
