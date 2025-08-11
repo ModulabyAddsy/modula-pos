@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 from datetime import datetime, timezone
+import shutil 
 
 # --- RUTA DE CONFIGURACIÓN ESTÁNDAR ---
 # Se define una única ubicación para el archivo de configuración.
@@ -71,39 +72,50 @@ def delete_config():
 # ✅ NUEVA FUNCIÓN: Para escanear los archivos de base de datos locales
 def get_local_db_file_info(id_empresa: str, id_sucursal: int) -> list:
     """
-    Escanea el directorio de bases de datos locales y devuelve una lista con
-    la información que el backend necesita para la comparación.
+    Escanea recursivamente los directorios de la empresa y devuelve una lista
+    con la información de los archivos locales para la sincronización.
     """
     file_info_list = []
     
-    # Asegurarse de que el directorio de bases de datos exista
-    DB_DIR.mkdir(parents=True, exist_ok=True)
+    # Define la carpeta raíz para esta empresa, p.ej., .../Databases/MOD_EMP_1001
+    company_root_path = DB_DIR / id_empresa
     
-    # Directorios en la nube
-    ruta_cloud_generales = f"{id_empresa}/databases_generales/"
-    ruta_cloud_sucursal = f"{id_empresa}/suc_{id_sucursal}/"
+    # Asegurarse de que el directorio de la empresa exista
+    company_root_path.mkdir(parents=True, exist_ok=True)
+    
+    # Escanea recursivamente todos los archivos .sqlite dentro de la carpeta de la empresa
+    # La función rglob es perfecta para esto.
+    for file_path in company_root_path.rglob('*.sqlite'):
+        try:
+            # La "key" en la nube es la ruta relativa desde la carpeta DB_DIR
+            # Esto garantiza que 'MOD_EMP_1001/suc_25/tickets.sqlite' coincida en local y en la nube.
+            key_en_la_nube = file_path.relative_to(DB_DIR).as_posix()
 
-    for filename in os.listdir(DB_DIR):
-        if filename.endswith(".sqlite"):
-            file_path = DB_DIR / filename
-            try:
-                mtime_ts = os.path.getmtime(file_path)
-                mtime_dt_utc = datetime.fromtimestamp(mtime_ts, tz=timezone.utc)
-                
-                # Inteligencia para construir la 'key' correcta de la nube
-                # (Asumimos que el nombre del archivo nos dice a qué carpeta pertenece)
-                # Esta lógica se puede hacer más robusta en el futuro.
-                key_en_la_nube = ""
-                if filename in ["usuarios.sqlite", "clientes.sqlite", "productos_servicios.sqlite"]:
-                    key_en_la_nube = f"{ruta_cloud_generales}{filename}"
-                else: # Asumimos que es un archivo de sucursal
-                    key_en_la_nube = f"{ruta_cloud_sucursal}{filename}"
-                
-                file_info_list.append({
-                    "key": key_en_la_nube,
-                    "last_modified": mtime_dt_utc.isoformat()
-                })
-            except Exception as e:
-                print(f"⚠️  No se pudo leer la información del archivo local {filename}: {e}")
+            mtime_ts = os.path.getmtime(file_path)
+            mtime_dt_utc = datetime.fromtimestamp(mtime_ts, tz=timezone.utc)
+            
+            file_info_list.append({
+                "key": key_en_la_nube,
+                "last_modified": mtime_dt_utc.isoformat()
+            })
+        except Exception as e:
+            print(f"⚠️  No se pudo leer la información del archivo local {file_path.name}: {e}")
                 
     return file_info_list
+
+def limpiar_datos_sucursal_anterior(id_empresa: str, id_sucursal_anterior: int):
+    """
+    Elimina de forma segura el directorio de una sucursal específica y todo su contenido.
+    """
+    # Construye la ruta al directorio de la sucursal, ej: .../Databases/MOD_EMP_1001/suc_25
+    ruta_sucursal_anterior = DB_DIR / id_empresa / f"suc_{id_sucursal_anterior}"
+    
+    if ruta_sucursal_anterior.exists() and ruta_sucursal_anterior.is_dir():
+        try:
+            # shutil.rmtree borra un directorio y todo lo que contiene. ¡Es muy potente!
+            shutil.rmtree(ruta_sucursal_anterior)
+            print(f"🧹 Datos locales de la sucursal {id_sucursal_anterior} eliminados exitosamente.")
+        except OSError as e:
+            print(f"❌ Error al eliminar el directorio de la sucursal anterior: {e}")
+    else:
+        print(f"ℹ️ No se encontraron datos locales para la sucursal {id_sucursal_anterior}. No se requiere limpieza.")

@@ -247,6 +247,11 @@ class ApiClient:
         url = f"{self.base_url}/sync/download/{key_en_la_nube}"
         headers = {"Authorization": f"Bearer {self.auth_token}"}
         try:
+            # ✅ LÍNEA CLAVE: Asegura que el directorio padre exista antes de escribir.
+            # Por ejemplo, si la ruta es '.../Databases/MOD_EMP_1001/suc_25/tickets.sqlite',
+            # esto creará la carpeta 'suc_25' si no existe.
+            ruta_local_destino.parent.mkdir(parents=True, exist_ok=True)
+
             with httpx.stream("GET", url, headers=headers, timeout=60.0) as response:
                 response.raise_for_status()
                 with open(ruta_local_destino, "wb") as f:
