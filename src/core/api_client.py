@@ -2,6 +2,8 @@
 import httpx
 import os
 from pathlib import Path
+import hashlib
+from src.core.local_storage import calcular_hash_md5
 
 class ApiClient:
     """Gestiona toda la comunicación con el backend de Modula."""
@@ -165,6 +167,27 @@ class ApiClient:
             return response.json()
         except Exception as e:
             raise Exception(f"Error al obtener sucursales: {e}")
+        
+    def get_mis_terminales(self) -> list:
+        """Obtiene la lista de terminales asociadas a la cuenta autenticada."""
+        if not self.auth_token:
+            raise Exception("Se requiere autenticación para obtener la lista de terminales.")
+        
+        url = f"{self.base_url}/terminales/mi-cuenta"
+        headers = {"Authorization": f"Bearer {self.auth_token}"}
+        
+        try:
+            # Reutilizamos el cliente httpx si ya existe, o creamos uno nuevo
+            with httpx.Client() as client:
+                response = client.get(url, headers=headers, timeout=15.0)
+            
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            detail = e.response.json().get("detail", "Error del servidor.")
+            raise Exception(f"Error al obtener la lista de terminales: {detail}")
+        except httpx.RequestError:
+            raise Exception("Error de conexión al obtener la lista de terminales.")
     
     def registrar_nueva_terminal(self, datos_terminal: dict) -> dict:
         """Llama al endpoint para registrar una nueva terminal para la cuenta."""
@@ -224,7 +247,7 @@ class ApiClient:
         headers = {"Authorization": f"Bearer {self.auth_token}"}
         
         payload_archivos = [
-            {"key": f["key"], "last_modified": f["last_modified"]}
+            {"key": f["key"], "last_modified": f["last_modified"], "hash": f["hash"]}
             for f in archivos_locales
         ]
         
@@ -263,19 +286,26 @@ class ApiClient:
             print(f"❌ Error al descargar {key_en_la_nube}: {e}")
             return False
 
-    def subir_archivo(self, ruta_local_origen: Path, key_en_la_nube: str):
-        """Sube un archivo local a una ruta específica en la nube."""
-        if not self.auth_token: raise Exception("Se requiere autenticación.")
-        url = f"{self.base_url}/sync/upload/{key_en_la_nube}"
-        headers = {"Authorization": f"Bearer {self.auth_token}"}
+    def subir_archivo(self, ruta_local, key_cloud, hash_base):
+        """
+        Sube un archivo a la nube, incluyendo el hash de la versión base para detectar conflictos.
+        """
         try:
-            with open(ruta_local_origen, "rb") as f:
-                files = {'file': (ruta_local_origen.name, f, 'application/x-sqlite3')}
-                with httpx.Client() as client:
-                    response = client.post(url, headers=headers, files=files, timeout=60.0)
+            with open(ruta_local, 'rb') as f:
+                # Añadimos el hash base como un header personalizado
+                headers = {'Authorization': f'Bearer {self.token}', 'X-Base-Version-Hash': hash_base}
+                response = self.client.post(f"{self.base_url}/sync/upload/{key_cloud}", files={'file': f}, headers=headers)
+                
+                if response.status_code == 409: # Conflicto detectado
+                    raise Exception("conflict")
+
                 response.raise_for_status()
-            print(f"✅ Subida completa: {ruta_local_origen.name}")
-            return True
+                print(f"✅ Subida completa: {os.path.basename(ruta_local)}")
+                return True
         except Exception as e:
-            print(f"❌ Error al subir {ruta_local_origen.name}: {e}")
+            if str(e) == "conflict":
+                print(f"⚠️  Conflicto detectado para {os.path.basename(ruta_local)}. Se requiere sincronización.")
+                # Relanzamos una excepción específica o un código para que el controller la maneje
+                raise ConnectionAbortedError("conflict")
+            print(f"❌ Error al subir {os.path.basename(ruta_local)}: {e}")
             return False

@@ -45,44 +45,67 @@ class StartupWorker(QObject):
                     save_terminal_id(hardware_id)
                     respuesta_verificacion = self.api_client.verificar_terminal(hardware_id)
                 except Exception:
-                    self.finished.emit("activacion_requerida", []); return
-            
+                    self.finished.emit("activacion_requerida", [])
+                    return
             if respuesta_verificacion.get("status") != "ok":
-                self.finished.emit(respuesta_verificacion, []); return
-            
+                self.finished.emit(respuesta_verificacion, [])
+                return
             self.api_client.set_auth_token(respuesta_verificacion["access_token"])
-
-            self.progress.emit("Sincronizando bases de datos...", 70)
+            
+            # === PASO 3: SINCRONIZACIÓN INTELIGENTE ===
+            self.progress.emit("Iniciando sincronización inteligente...", 70)
             id_sucursal = respuesta_verificacion['id_sucursal']
             id_empresa = respuesta_verificacion['id_empresa']
+            
+            # 1. Obtener la lista de archivos locales
             archivos_locales = get_local_db_file_info(id_empresa, id_sucursal)
+            
+            # 2. Obtener el plan de sincronización del backend
             plan_sync = self.api_client.check_sync_status(id_sucursal, archivos_locales)
             
-            # === ✅ NUEVO: PASO 3: EJECUCIÓN DEL PLAN Y CREACIÓN DE RESUMEN ===
+            # 3. Ejecutar el plan de acciones
             resumen_sync = []
-            
-            # Ejecutar acciones de esquema (descargar nuevas DBs de la plantilla)
-            for accion in plan_sync.get("schema_actions", []):
-                nombre_archivo = os.path.basename(accion['key_destino'])
-                ruta_local = DB_DIR / nombre_archivo
-                self.progress.emit(f"Instalando: {nombre_archivo}...", 80)
-                if self.api_client.descargar_archivo(accion['key_origen'], ruta_local):
-                    resumen_sync.append(f"Nueva base de datos '{nombre_archivo}' instalada.")
+            ruta_base_empresa = DB_DIR / plan_sync.get('id_empresa')
 
-            # Ejecutar acciones de datos (subir/bajar actualizaciones)
-            for accion in plan_sync.get("data_actions", []):
-                nombre_archivo = os.path.basename(accion['key'])
-                ruta_local = DB_DIR / nombre_archivo
-                
-                if accion['accion'] == "descargar_actualizacion":
-                    self.progress.emit(f"Descargando: {nombre_archivo}...", 90)
-                    if self.api_client.descargar_archivo(accion['key'], ruta_local):
-                        resumen_sync.append(f"'{nombre_archivo}' actualizado desde la nube.")
-                elif accion['accion'] == "subir_actualizacion":
-                    self.progress.emit(f"Subiendo: {nombre_archivo}...", 90)
-                    if self.api_client.subir_archivo(ruta_local, accion['key']):
+            for i, accion in enumerate(plan_sync.get("acciones", [])):
+                progreso_actual = 70 + int((i / len(plan_sync['acciones'])) * 25)
+                tipo = accion.get('accion')
+
+                if tipo == "ensure_dir":
+                    ruta_a_crear = ruta_base_empresa / accion['ruta_relativa']
+                    os.makedirs(ruta_a_crear, exist_ok=True)
+
+                elif tipo in ["descargar_db_modelo", "actualizar_datos"]:
+                    ruta_destino = ruta_base_empresa / accion['destino_relativo']
+                    nombre_archivo = os.path.basename(ruta_destino)
+                    self.progress.emit(f"Descargando: {nombre_archivo}", progreso_actual)
+                    origen = accion.get('origen_cloud') or accion.get('key_cloud')
+                    if self.api_client.descargar_archivo(origen, ruta_destino):
+                        resumen_sync.append(f"'{nombre_archivo}' descargado/actualizado.")
+
+                elif tipo == "migrar_esquema":
+                    db_path = ruta_base_empresa / accion['db_relativa']
+                    nombre_db = os.path.basename(db_path)
+                    self.progress.emit(f"Migrando {nombre_db}", progreso_actual)
+                    # Aquí usamos nuestro nuevo helper
+                    from src.core.local_storage import ejecutar_migracion_sql
+                    if ejecutar_migracion_sql(db_path, accion['comandos_sql']):
+                        resumen_sync.append(f"Esquema de '{nombre_db}' actualizado.")
+                    else:
+                        raise Exception(f"Fallo al migrar el esquema de {nombre_db}")
+
+                elif tipo == "subir_db":
+                    ruta_origen = ruta_base_empresa / accion['origen_relativo']
+                    nombre_archivo = os.path.basename(ruta_origen)
+                    self.progress.emit(f"Subiendo: {nombre_archivo}", progreso_actual)
+                    
+                    # Obtenemos el hash base que nos envió el plan
+                    hash_base_nube = accion.get('hash_base') # Puede ser None si el archivo no existía en la nube
+                    
+                    # Y aquí le pasamos el tercer argumento que faltaba
+                    if self.api_client.subir_archivo(ruta_origen, accion['key_cloud'], hash_base_nube):
                         resumen_sync.append(f"'{nombre_archivo}' sincronizado con la nube.")
-            
+
             if not resumen_sync:
                 resumen_sync.append("Todo está sincronizado.")
             
@@ -90,6 +113,8 @@ class StartupWorker(QObject):
             self.finished.emit(respuesta_verificacion, resumen_sync)
 
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             self.finished.emit(f"Error crítico en el arranque: {e}", [])
 
 

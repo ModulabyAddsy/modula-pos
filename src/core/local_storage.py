@@ -4,7 +4,8 @@ import os
 from pathlib import Path
 from datetime import datetime, timezone
 import shutil 
-
+import sqlite3
+import hashlib
 # --- RUTA DE CONFIGURACIÓN ESTÁNDAR ---
 # Se define una única ubicación para el archivo de configuración.
 # Usar os.getenv('APPDATA') es una práctica común en Windows para encontrar la carpeta
@@ -68,6 +69,12 @@ def delete_config():
     except OSError as e:
         print(f"❌ Error al borrar el archivo de configuración: {e}")
 
+def calcular_hash_md5(file_path):
+    hash_md5 = hashlib.md5()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            hash_md5.update(chunk)
+    return hash_md5.hexdigest()
 
 # ✅ NUEVA FUNCIÓN: Para escanear los archivos de base de datos locales
 def get_local_db_file_info(id_empresa: str, id_sucursal: int) -> list:
@@ -94,9 +101,12 @@ def get_local_db_file_info(id_empresa: str, id_sucursal: int) -> list:
             mtime_ts = os.path.getmtime(file_path)
             mtime_dt_utc = datetime.fromtimestamp(mtime_ts, tz=timezone.utc)
             
+            file_hash = calcular_hash_md5(file_path)
+            
             file_info_list.append({
                 "key": key_en_la_nube,
-                "last_modified": mtime_dt_utc.isoformat()
+                "last_modified": mtime_dt_utc.isoformat(), # <-- Esto lo convierte a texto JSON-compatible
+                "hash": file_hash
             })
         except Exception as e:
             print(f"⚠️  No se pudo leer la información del archivo local {file_path.name}: {e}")
@@ -119,3 +129,31 @@ def limpiar_datos_sucursal_anterior(id_empresa: str, id_sucursal_anterior: int):
             print(f"❌ Error al eliminar el directorio de la sucursal anterior: {e}")
     else:
         print(f"ℹ️ No se encontraron datos locales para la sucursal {id_sucursal_anterior}. No se requiere limpieza.")
+
+def ejecutar_migracion_sql(db_path: Path, comandos: list[str]):
+    """
+    Se conecta a una base de datos SQLite local y ejecuta una lista de comandos SQL.
+    """
+    if not db_path.exists():
+        print(f"❌ Error de migración: La base de datos {db_path} no existe.")
+        return False
+    
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        print(f"🚀 Migrando esquema para {db_path.name}...")
+        for comando in comandos:
+            print(f"   -> Ejecutando: {comando}")
+            cursor.execute(comando)
+        conn.commit()
+        print(f"✅ Esquema de {db_path.name} migrado exitosamente.")
+        return True
+    except sqlite3.Error as e:
+        print(f"❌ Error fatal durante la migración de {db_path.name}: {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()
