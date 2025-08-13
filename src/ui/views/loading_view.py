@@ -1,37 +1,74 @@
 # src/ui/views/loading_view.py
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QProgressBar
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar
+from PySide6.QtGui import QPixmap
 from PySide6.QtCore import Qt
+from pathlib import Path
+
+# Bloque para calcular la ruta absoluta a la raíz del proyecto
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 class LoadingView(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("LoadingView")
-        layout = QVBoxLayout(self)
-        layout.setAlignment(Qt.AlignCenter)
-        layout.setSpacing(10)
 
-        self.title_label = QLabel("Iniciando Modula POS", self)
-        self.title_label.setObjectName("loadingTitle")
+        logo_modula_path = str(PROJECT_ROOT / "src" / "assets" / "images" / "logo_modula.png")
+        logo_addsy_path = str(PROJECT_ROOT / "src" / "assets" / "images" / "logo_addsy_powered.png")
+
+        # 1. Widgets de la Interfaz
+        self.logo_label = QLabel()
+        pixmap_modula = QPixmap(logo_modula_path)
+        self.logo_label.setPixmap(pixmap_modula.scaled(96, 96, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self.logo_label.setAlignment(Qt.AlignCenter)
+        
+        self.title_label = QLabel("<b>MODULA</b> POS")
+        self.title_label.setObjectName("LoadingTitle")
         self.title_label.setAlignment(Qt.AlignCenter)
 
-        # ✅ NUEVO: Etiqueta para mostrar el estado actual
-        self.status_label = QLabel("Preparando...", self)
-        self.status_label.setObjectName("loadingSubtitle")
+        self.status_label = QLabel("Iniciando Modula POS...")
+        self.status_label.setObjectName("LoadingStatus")
         self.status_label.setAlignment(Qt.AlignCenter)
-        self.status_label.setMinimumWidth(400) # Para evitar que la ventana cambie de tamaño
 
-        self.progress_bar = QProgressBar(self)
-        self.progress_bar.setRange(0, 100) # Ahora es una barra de progreso determinada
-        self.progress_bar.setValue(0)
+        self.progress_bar = QProgressBar()
         self.progress_bar.setTextVisible(False)
-        self.progress_bar.setMaximumWidth(300)
+        self.progress_bar.setMaximum(100)
+        self.progress_bar.setValue(0)
+        
+        # Contenedor y layout para el footer
+        footer_container = QWidget()
+        footer_layout = QHBoxLayout(footer_container)
+        footer_layout.setContentsMargins(0,0,0,0)
+        footer_layout.setSpacing(6)
 
+        footer_text_label = QLabel("Powered by:")
+        footer_text_label.setObjectName("LoadingFooterText")
+
+        self.footer_logo_label = QLabel()
+        pixmap_addsy = QPixmap(logo_addsy_path)
+        
+        # ▼▼▼ CORRECCIÓN CLAVE AQUÍ ▼▼▼
+        # Se ajusta la altura a un tamaño apropiado para el footer
+        self.footer_logo_label.setPixmap(pixmap_addsy.scaledToHeight(69, Qt.SmoothTransformation))
+        
+        footer_layout.addStretch()
+        footer_layout.addWidget(footer_text_label)
+        footer_layout.addWidget(self.footer_logo_label)
+        footer_layout.addStretch()
+
+        # 2. Layout Vertical Principal
+        layout = QVBoxLayout(self)
+        layout.addStretch()
+        layout.addWidget(self.logo_label)
         layout.addWidget(self.title_label)
+        layout.addSpacing(20)
         layout.addWidget(self.status_label)
         layout.addWidget(self.progress_bar)
+        layout.addStretch()
+        layout.addWidget(footer_container)
+        layout.setContentsMargins(50, 20, 50, 20)
+        
         self.setLayout(layout)
-    
-    def update_status(self, message: str, progress: int):
-        """Actualiza el mensaje de estado y el valor de la barra de progreso."""
+
+    def update_status(self, message: str, percentage: int):
         self.status_label.setText(message)
-        self.progress_bar.setValue(progress)
+        self.progress_bar.setValue(percentage)

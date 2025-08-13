@@ -83,3 +83,31 @@ QPushButton#link-style-button {
 QPushButton#link-style-button:hover {
     color: #1D4ED8; /* Azul más oscuro al pasar el mouse (blue-700) */
 }
+
+#LoadingView {
+    background-color: #ffffff; /* Fondo blanco */
+}
+
+#LoadingTitle {
+    font-size: 28px;
+    font-weight: bold;
+    color: #333;
+    /* Si decides no usar este label, puedes borrar esta sección */
+}
+
+#LoadingStatus {
+    font-size: 14px;
+    color: #555; /* Un gris sutil */
+}
+
+QProgressBar {
+    border: none; /* Sin borde */
+    background-color: #e0e0e0; /* Color de la barra de fondo */
+    border-radius: 5px; /* Bordes redondeados */
+    height: 10px; /* Altura de la barra */
+}
+
+QProgressBar::chunk {
+    background-color: #0078d4; /* Color azul de progreso */
+    border-radius: 5px; /* Bordes redondeados para el progreso */
+}
