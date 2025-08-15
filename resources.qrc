@@ -1,7 +1,8 @@
 <!DOCTYPE RCC>
 <RCC version="1.0">
 <qresource prefix="/">
-    <file alias="images/logo_modula.png">assets/images/logo_modula.png</file>
-    <file alias="images/logo_addsy_powered.png">assets/images/logo_addsy_powered.png</file>
+    <file alias="images/logo_modula.png">src/assets/images/logo_modula.png</file>
+    <file alias="images/logo_modula.ico">src/assets/images/logo_modula.ico</file>
+    <file alias="images/logo_addsy.png">src/assets/images/logo_addsy.png</file>
 </qresource>
 </RCC>

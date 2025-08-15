@@ -1,7 +1,7 @@
 # src/ui/views/loading_view.py
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar
 from PySide6.QtGui import QPixmap
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve # <-- 1. IMPORTAMOS las clases de animación
 from pathlib import Path
 
 # Bloque para calcular la ruta absoluta a la raíz del proyecto
@@ -34,6 +34,13 @@ class LoadingView(QWidget):
         self.progress_bar.setMaximum(100)
         self.progress_bar.setValue(0)
         
+        # --- 2. CREAMOS Y CONFIGURAMOS EL OBJETO DE ANIMACIÓN ---
+        # Lo guardamos como un atributo de la clase para poder usarlo después
+        self.progress_animation = QPropertyAnimation(self.progress_bar, b"value") # b"value" es la propiedad que animaremos
+        self.progress_animation.setDuration(200) # Duración de la animación en milisegundos
+        self.progress_animation.setEasingCurve(QEasingCurve.InOutQuad) # Un efecto de aceleración suave
+        # --------------------------------------------------------
+        
         # Contenedor y layout para el footer
         footer_container = QWidget()
         footer_layout = QHBoxLayout(footer_container)
@@ -45,10 +52,7 @@ class LoadingView(QWidget):
 
         self.footer_logo_label = QLabel()
         pixmap_addsy = QPixmap(logo_addsy_path)
-        
-        # ▼▼▼ CORRECCIÓN CLAVE AQUÍ ▼▼▼
-        # Se ajusta la altura a un tamaño apropiado para el footer
-        self.footer_logo_label.setPixmap(pixmap_addsy.scaledToHeight(69, Qt.SmoothTransformation))
+        self.footer_logo_label.setPixmap(pixmap_addsy.scaledToHeight(80, Qt.SmoothTransformation))
         
         footer_layout.addStretch()
         footer_layout.addWidget(footer_text_label)
@@ -69,6 +73,21 @@ class LoadingView(QWidget):
         
         self.setLayout(layout)
 
+    # --- 3. REEMPLAZAMOS EL MÉTODO update_status ---
     def update_status(self, message: str, percentage: int):
+        """
+        Método público para ser llamado desde el app_controller.
+        Ahora, en lugar de saltar, anima la barra de progreso.
+        """
         self.status_label.setText(message)
-        self.progress_bar.setValue(percentage)
+        
+        # Detenemos cualquier animación anterior para evitar conflictos
+        self.progress_animation.stop() 
+        
+        # Definimos el punto de inicio (el valor actual) y el final (el nuevo porcentaje)
+        self.progress_animation.setStartValue(self.progress_bar.value())
+        self.progress_animation.setEndValue(percentage)
+        
+        # ¡Iniciamos la animación!
+        self.progress_animation.start()
+    # ---------------------------------------------

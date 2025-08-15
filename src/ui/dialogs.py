@@ -1,6 +1,7 @@
 # src/ui/dialogs.py
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QLabel, QLineEdit, 
-                               QDialogButtonBox, QMessageBox, QRadioButton, QComboBox, QSizePolicy, QSpacerItem)
+                               QDialogButtonBox, QMessageBox, QRadioButton, QComboBox, QSizePolicy, QSpacerItem, QPushButton,
+                               QHBoxLayout)
 
 
 class CrearSucursalDialog(QDialog):
@@ -113,20 +114,48 @@ class RecuperarContrasenaDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Recuperar Contraseña")
-        
-        self.layout = QVBoxLayout(self)
-        self.label = QLabel("Ingresa el correo electrónico asociado a tu cuenta Addsy para recibir un enlace de recuperación.")
-        self.label.setWordWrap(True)
+        self.setObjectName("CustomDialog") # Para aplicar estilos
+        self.setMinimumWidth(400)
+
+        # --- Layout Principal ---
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(15)
+
+        # --- Título del Diálogo ---
+        title_label = QLabel("Recuperar contraseña")
+        title_label.setObjectName("DialogTitle")
+
+        # --- Texto Descriptivo ---
+        info_label = QLabel("Ingresa tu correo para recibir las instrucciones de recuperación.")
+        info_label.setObjectName("DialogInfoText")
+        info_label.setWordWrap(True)
+
+        # --- Campo de Email ---
         self.email_input = QLineEdit()
         self.email_input.setPlaceholderText("tu-correo@ejemplo.com")
         
-        self.buttonBox = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        self.buttonBox.accepted.connect(self.accept)
-        self.buttonBox.rejected.connect(self.reject)
-        
-        self.layout.addWidget(self.label)
-        self.layout.addWidget(self.email_input)
-        self.layout.addWidget(self.buttonBox)
+        # --- Layout para los Botones (Cancel, Send) ---
+        button_layout = QHBoxLayout()
+        button_layout.addStretch() # Empuja los botones a la derecha
+
+        self.cancel_button = QPushButton("Cancelar")
+        self.send_button = QPushButton("Enviar")
+        self.send_button.setObjectName("LoginButton") # Reutilizamos el estilo del botón primario
+
+        button_layout.addWidget(self.cancel_button)
+        button_layout.addWidget(self.send_button)
+
+        # --- Añadir todos los widgets al layout principal ---
+        main_layout.addWidget(title_label)
+        main_layout.addWidget(info_label)
+        main_layout.addWidget(self.email_input)
+        main_layout.addStretch() # Espacio flexible
+        main_layout.addLayout(button_layout)
+
+        # --- Conexiones ---
+        self.send_button.clicked.connect(self.accept) # 'accept' cierra el diálogo con resultado "Ok"
+        self.cancel_button.clicked.connect(self.reject) # 'reject' cierra el diálogo con resultado "Cancel"
 
     def get_email(self):
+        """Esta función se mantiene igual y es la que usa el app_controller."""
         return self.email_input.text().strip()

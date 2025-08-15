@@ -111,3 +111,213 @@ QProgressBar::chunk {
     background-color: #0078d4; /* Color azul de progreso */
     border-radius: 5px; /* Bordes redondeados para el progreso */
 }
+
+#AuthLeftPanel {
+    background-color: #0078d4; /* Azul de Modula */
+}
+
+#AuthTagline {
+    color: white;
+    font-size: 16px;
+    padding-top: 10px;
+}
+
+#AuthRightPanel {
+    background-color: #fcfcfc; /* Un blanco ligeramente cálido */
+}
+
+#AuthTitle {
+    font-size: 24px;
+    font-weight: bold;
+    color: #333;
+}
+
+#AuthErrorLabel {
+    color: #c0392b; /* Rojo para errores */
+    font-size: 12px;
+}
+
+QLineEdit {
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 4px;
+    font-size: 14px;
+    background-color: white;
+    min-height: 20px; /* <-- AÑADE ESTA LÍNEA */
+}
+
+QLineEdit:focus {
+    border: 1px solid #0078d4; /* Resaltado azul al seleccionar */
+}
+
+#LoginButton {
+    background-color: #0078d4;
+    color: white;
+    font-weight: bold;
+    font-size: 14px;
+    border: none;
+    border-radius: 4px;
+    padding: 10px;
+}
+
+#LoginButton:hover {
+    background-color: #005a9e; /* Un azul más oscuro al pasar el ratón */
+}
+
+#SecondaryLink {
+    background-color: transparent;
+    border: none;
+    color: #0078d4;
+    font-size: 12px;
+    text-decoration: underline;
+}
+
+#SecondaryLink:hover {
+    color: #005a9e;
+}
+
+/* === ESTILOS PARA LA VISTA DE AUTENTICACIÓN === */
+#AuthRightPanel {
+    background-color: #f3f4f6; /* Gris claro de fondo */
+}
+
+#AuthFormCard {
+    background-color: white;
+    border-radius: 12px;
+}
+
+#AuthTitle {
+    font-size: 24px;
+    font-weight: bold;
+    color: #1f2937; /* Gris oscuro para texto */
+}
+
+#PoweredByText {
+    color: #6b7280; /* Gris medio */
+    font-size: 12px;
+}
+
+/* Contenedor del campo de texto con ícono */
+#IconLineEdit {
+    border: 1px solid #d1d5db; /* Borde gris claro */
+    border-radius: 6px;
+    background-color: white;
+}
+#IconLineEdit:focus-within {
+    border: 1px solid #0078d4; /* Resaltado azul al enfocar */
+}
+
+/* Campo de texto real, sin borde ni fondo */
+#TransparentLineEdit {
+    border: none;
+    background-color: transparent;
+    font-size: 14px;
+}
+
+/* Botón principal */
+#LoginButton {
+    background-color: #0078d4;
+    color: white;
+    font-weight: bold;
+    font-size: 14px;
+    border: none;
+    border-radius: 6px;
+    padding: 12px;
+    min-height: 24px;
+}
+#LoginButton:hover {
+    background-color: #005a9e;
+}
+
+/* Checkbox */
+QCheckBox {
+    font-size: 12px;
+    color: #4b5563;
+}
+
+/* Enlaces secundarios */
+#SecondaryLink {
+    background-color: transparent;
+    border: none;
+    color: #0078d4;
+    font-size: 12px;
+    text-decoration: underline;
+}
+#SecondaryLink:hover {
+    color: #005a9e;
+}
+#SecondaryLinkRed {
+    background-color: transparent;
+    border: none;
+    color: #dc2626; /* Rojo para acciones como 'olvidé contraseña' */
+    font-size: 12px;
+}
+#SecondaryLinkRed:hover {
+    color: #b91c1c;
+}
+
+#VersionLabel {
+    color: #9ca3af; /* Gris claro para la versión */
+    font-size: 10px;
+    padding: 5px;
+}
+
+#AuthLeftPanel {
+    /* --- CORREGIDO: Fondo blanco y borde derecho --- */
+    background-color: white;
+    border-right: 1px solid #e5e7eb; /* Un gris muy claro para la separación */
+}
+
+#AuthBrandText {
+    /* --- CORREGIDO: Letras en color azul --- */
+    color: #0078d4;
+    font-size: 48px;
+    font-weight: bold;
+}
+
+#AuthTagline {
+    /* --- CORREGIDO: Letras en color azul --- */
+    color: #005a9e; /* Un azul más oscuro y sutil */
+    font-size: 16px;
+    font-style: italic;
+}
+
+#CustomDialog {
+    background-color: #ffffff;
+}
+
+#DialogTitle {
+    font-size: 18px;
+    font-weight: bold;
+    color: #1f2937; /* Gris oscuro */
+}
+
+#DialogInfoText {
+    font-size: 14px;
+    color: #6b7280; /* Gris medio */
+}
+
+/* Estilo para el botón secundario "Cancelar" */
+#CustomDialog QPushButton {
+    border: 1px solid #d1d5db; /* Borde gris claro */
+    border-radius: 6px;
+    padding: 8px 16px;
+    background-color: white;
+    font-size: 14px;
+}
+
+#CustomDialog QPushButton:hover {
+    background-color: #f9fafb; /* Un gris muy claro al pasar el ratón */
+}
+
+/* Sobrescribimos el estilo para el botón primario "Enviar" */
+#CustomDialog QPushButton#LoginButton {
+    background-color: #0078d4;
+    color: white;
+    font-weight: bold;
+    border: none;
+}
+
+#CustomDialog QPushButton#LoginButton:hover {
+    background-color: #005a9e;
+}
