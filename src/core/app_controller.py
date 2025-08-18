@@ -8,7 +8,7 @@ from PySide6.QtCore import QTimer, QObject, Signal, QThread
 from src.ui.main_window import MainWindow
 from src.core.api_client import ApiClient
 from src.core.local_storage import get_id_terminal, save_terminal_id, DB_DIR, get_local_db_file_info
-from src.ui.dialogs import mostrar_dialogo_migracion, ResolverUbicacionDialog, SeleccionarSucursalDialog, RecuperarContrasenaDialog
+from src.ui.dialogs import mostrar_dialogo_migracion, ResolverUbicacionDialog, SeleccionarSucursalDialog, RecuperarContrasenaDialog, NewTerminalDialog
 import time
 
 class StartupWorker(QObject):
@@ -262,25 +262,34 @@ class AppController(QObject):
 
     def handle_nueva_terminal(self):
         try:
-            msg = (
-                "<h3>Registrar Nueva Terminal</h3>"
-                "<p>Hemos detectado que estás iniciando sesión desde un dispositivo no registrado.</p>"
-                "<p>¿Deseas añadir este equipo como una nueva terminal en tu cuenta?</p>"
-                "<p><b>Nota:</b> Se aplicará un cargo adicional recurrente de $50 MXN/mes a tu suscripción.</p>"
-            )
-            respuesta = QMessageBox.question(self.main_window, "Nueva Terminal Detectada", msg, QMessageBox.Yes | QMessageBox.No)
-            if respuesta == QMessageBox.No: return
+            # <<-- CAMBIO: Instanciamos nuestro nuevo diálogo personalizado.
+            dialogo_terminos = NewTerminalDialog(self.main_window)
+            
+            # <<-- CAMBIO: Usamos .exec() que devuelve True si el usuario acepta, False si cancela.
+            # La lógica interna del diálogo ya se encarga de que el botón "Aceptar"
+            # solo se active si se marca el checkbox.
+            if not dialogo_terminos.exec():
+                print("El usuario canceló el registro de la nueva terminal.")
+                return # Si el usuario cancela, simplemente salimos de la función.
 
+            # El resto de tu lógica se ejecuta solo si el usuario aceptó los términos.
             sucursales = self.api_client.get_mis_sucursales()
             id_sucursal_seleccionada = None
+
             if len(sucursales) == 1:
                 id_sucursal_seleccionada = sucursales[0]["id"]
             else:
-                dialogo = SeleccionarSucursalDialog(sucursales, self.main_window)
-                if dialogo.exec():
-                    id_sucursal_seleccionada = dialogo.get_selected_sucursal_id()
-                else: return
+                dialogo_sucursal = SeleccionarSucursalDialog(sucursales, self.main_window)
+                if dialogo_sucursal.exec():
+                    id_sucursal_seleccionada = dialogo_sucursal.get_selected_sucursal_id()
+                else:
+                    print("El usuario canceló la selección de sucursal.")
+                    return # Cancelación en el segundo paso
             
+            # Asegurarse de que se seleccionó una sucursal
+            if not id_sucursal_seleccionada:
+                return
+
             nombre_terminal, ok = QInputDialog.getText(self.main_window, "Nombre de la Terminal", "Ingresa un nombre para identificar esta terminal (ej. 'Caja 2'):")
             if not ok or not nombre_terminal.strip():
                 QMessageBox.warning(self.main_window, "Acción Cancelada", "El nombre de la terminal no puede estar vacío.")
@@ -288,10 +297,16 @@ class AppController(QObject):
             
             hardware_id = self._generar_id_estable()
             datos_terminal = {"id_terminal": hardware_id, "nombre_terminal": nombre_terminal.strip(), "id_sucursal": id_sucursal_seleccionada}
+            
             self.api_client.registrar_nueva_terminal(datos_terminal)
             save_terminal_id(hardware_id)
+            
             QMessageBox.information(self.main_window, "¡Éxito!", "La nueva terminal ha sido registrada y configurada.")
-            self.main_window.mostrar_vista_dashboard()
+            
+            # <<-- CAMBIO SUTIL: En lugar de ir al dashboard, es más robusto reiniciar el
+            # proceso de arranque para que verifique la nueva terminal y sincronice todo.
+            self._iniciar_arranque_inteligente()
+
         except Exception as e:
             self.show_error(f"No se pudo registrar la nueva terminal: {e}")
 

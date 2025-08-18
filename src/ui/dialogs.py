@@ -1,8 +1,12 @@
 # src/ui/dialogs.py
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QLabel, QLineEdit, 
                                QDialogButtonBox, QMessageBox, QRadioButton, QComboBox, QSizePolicy, QSpacerItem, QPushButton,
-                               QHBoxLayout)
+                               QHBoxLayout, QTextEdit, QCheckBox)
+from PySide6.QtGui import QIcon, QFont
+from PySide6.QtCore import Qt
+from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 class CrearSucursalDialog(QDialog):
     def __init__(self, ciudad, parent=None):
@@ -159,3 +163,90 @@ class RecuperarContrasenaDialog(QDialog):
     def get_email(self):
         """Esta función se mantiene igual y es la que usa el app_controller."""
         return self.email_input.text().strip()
+
+class NewTerminalDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        # --- CONFIGURACIÓN DE LA VENTANA ---
+        self.setWindowTitle("Registro de Nueva Terminal")
+
+        # <<-- CAMBIO: Construimos la ruta absoluta al ícono y la usamos
+        icon_path = str(PROJECT_ROOT / "src" / "assets" / "images" / "logo_modula.ico")
+        self.setWindowIcon(QIcon(icon_path)) # Usamos la ruta correcta y segura
+        
+        self.setMinimumSize(450, 400)
+        self.setObjectName("NewTerminalDialog")
+        self.setModal(True)
+
+        # --- WIDGETS ---
+        # (El resto del código de la clase no necesita cambios y permanece igual)
+        # Título principal
+        self.title_label = QLabel("Detectamos un nuevo equipo")
+        self.title_label.setObjectName("titleLabel")
+
+        # Subtítulo explicativo
+        self.subtitle_label = QLabel(
+            "Para continuar, es necesario registrar este dispositivo como una "
+            "nueva terminal asociada a tu cuenta de Modula."
+        )
+        self.subtitle_label.setObjectName("subtitleLabel")
+        self.subtitle_label.setWordWrap(True)
+
+        # Recuadro con Términos y Condiciones
+        self.terms_text_edit = QTextEdit()
+        self.terms_text_edit.setReadOnly(True)
+        self.terms_text_edit.setObjectName("termsTextEdit")
+        self.terms_text_edit.setHtml(
+            """
+            <h4 style="margin-bottom: 5px;">Términos y Condiciones por Terminal Adicional</h4>
+            <p>Al aceptar y registrar esta nueva terminal, usted comprende y está de acuerdo con las siguientes condiciones:</p>
+            <ul>
+                <li><b>Cargo Adicional:</b> Se aplicará un cargo recurrente de <b>$50.00 MXN + IVA</b> a su suscripción mensual por cada terminal adicional registrada. Este monto se verá reflejado en su próximo estado de cuenta.</li>
+                <li><b>Activación:</b> La terminal se activará de forma inmediata tras la confirmación, permitiendo el acceso completo a las funciones de Modula Punto de Venta.</li>
+                <li><b>Facturación:</b> El cobro es recurrente y se mantendrá activo mientras la terminal no sea dada de baja desde su panel de administración de cuenta en el portal de Addsy.</li>
+                <li><b>Gestión:</b> Puede administrar, desactivar o eliminar sus terminales en cualquier momento desde la sección "Mi Suscripción" > "Administrar Terminales" en su cuenta.</li>
+            </ul>
+            """
+        )
+
+        # Checkbox de aceptación
+        self.accept_checkbox = QCheckBox("He leído y acepto los Términos y Condiciones para añadir una nueva terminal.")
+        self.accept_checkbox.setObjectName("acceptCheckbox")
+
+        # Botones de Acción
+        self.cancel_button = QPushButton("Cancelar")
+        self.cancel_button.setObjectName("cancelButton")
+        
+        self.accept_button = QPushButton("Aceptar y Registrar")
+        self.accept_button.setObjectName("acceptButton")
+        self.accept_button.setEnabled(False) # Deshabilitado por defecto
+
+        # --- LAYOUTS ---
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(25, 25, 25, 25)
+        main_layout.setSpacing(15)
+
+        buttons_layout = QHBoxLayout()
+        buttons_layout.addSpacerItem(QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
+        buttons_layout.addWidget(self.cancel_button)
+        buttons_layout.addWidget(self.accept_button)
+
+        main_layout.addWidget(self.title_label)
+        main_layout.addWidget(self.subtitle_label)
+        main_layout.addWidget(self.terms_text_edit)
+        main_layout.addWidget(self.accept_checkbox)
+        main_layout.addSpacerItem(QSpacerItem(20, 20, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
+        main_layout.addLayout(buttons_layout)
+        
+        # --- SEÑALES Y SLOTS (Lógica) ---
+        self.accept_checkbox.stateChanged.connect(self.toggle_accept_button)
+        self.accept_button.clicked.connect(self.accept)
+        self.cancel_button.clicked.connect(self.reject)
+
+    def toggle_accept_button(self, state):
+        """Habilita o deshabilita el botón de aceptar según el estado del checkbox."""
+        if state == Qt.CheckState.Checked.value:
+            self.accept_button.setEnabled(True)
+        else:
+            self.accept_button.setEnabled(False)

@@ -321,3 +321,61 @@ QCheckBox {
 #CustomDialog QPushButton#LoginButton:hover {
     background-color: #005a9e;
 }
+
+#NewTerminalDialog {
+    background-color: #FFFFFF; /* Fondo blanco */
+}
+
+#NewTerminalDialog #titleLabel {
+    font-size: 18px;
+    font-weight: bold;
+    color: #1F2937; /* Gris oscuro para el texto principal */
+}
+
+#NewTerminalDialog #subtitleLabel {
+    font-size: 14px;
+    color: #4B5563; /* Gris un poco más claro */
+}
+
+#NewTerminalDialog #termsTextEdit {
+    background-color: #F3F4F6; /* Fondo gris claro para el recuadro */
+    border: 1px solid #D1D5DB;
+    border-radius: 8px;
+    font-size: 12px;
+    padding: 10px;
+}
+
+#NewTerminalDialog #acceptCheckbox {
+    font-size: 13px;
+    color: #374151;
+}
+
+#NewTerminalDialog #acceptButton {
+    background-color: #3B82F6; /* Azul primario de Modula/Addsy */
+    color: white;
+    font-weight: bold;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 8px;
+}
+
+#NewTerminalDialog #acceptButton:hover {
+    background-color: #2563EB; /* Azul más oscuro al pasar el mouse */
+}
+
+#NewTerminalDialog #acceptButton:disabled {
+    background-color: #9CA3AF; /* Gris cuando está deshabilitado */
+}
+
+#NewTerminalDialog #cancelButton {
+    background-color: transparent;
+    color: #4B5563;
+    border: 1px solid #D1D5DB;
+    padding: 10px 20px;
+    border-radius: 8px;
+}
+
+#NewTerminalDialog #cancelButton:hover {
+    background-color: #F9FAFB;
+    border-color: #9CA3AF;
+}
