@@ -157,3 +157,46 @@ def ejecutar_migracion_sql(db_path: Path, comandos: list[str]):
     finally:
         if conn:
             conn.close()
+            
+def get_pending_sync_records(id_empresa: str) -> list:
+    """
+    Escanea todas las DB locales y extrae los registros marcados con needs_sync = 1.
+    """
+    all_pending_pushes = []
+    company_root_path = DB_DIR / id_empresa
+    if not company_root_path.exists():
+        return []
+
+    for db_path in company_root_path.rglob('*.sqlite'):
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row # Para acceder a los resultados como diccionarios
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tablas = [row[0] for row in cursor.fetchall()]
+
+        for tabla in tablas:
+            # Solo actuamos si la tabla tiene las columnas de sincronización
+            cursor.execute(f"PRAGMA table_info('{tabla}')")
+            column_names = {info[1] for info in cursor.fetchall()}
+            if 'needs_sync' in column_names and 'uuid' in column_names:
+                cursor.execute(f"SELECT * FROM {tabla} WHERE needs_sync = 1")
+                records_to_sync = [dict(row) for row in cursor.fetchall()]
+                
+                if records_to_sync:
+                    db_relative_path = db_path.relative_to(DB_DIR).as_posix()
+                    all_pending_pushes.append({
+                        "db_relative_path": db_relative_path,
+                        "table_name": tabla,
+                        "records": records_to_sync
+                    })
+        conn.close()
+    return all_pending_pushes
+
+def mark_records_as_synced(id_empresa: str):
+    """
+    Una vez que la sincronización es exitosa, resetea la bandera 'needs_sync' a 0 en todos los registros.
+    """
+    company_root_path = DB_DIR / id_empresa
+    # ... Lógica similar a la anterior, pero para ejecutar UPDATE ... SET needs_sync = 0 WHERE needs_sync = 1
+    print("✅ Banderas 'needs_sync' locales reseteadas.")

@@ -202,7 +202,7 @@ class NewTerminalDialog(QDialog):
             <h4 style="margin-bottom: 5px;">Términos y Condiciones por Terminal Adicional</h4>
             <p>Al aceptar y registrar esta nueva terminal, usted comprende y está de acuerdo con las siguientes condiciones:</p>
             <ul>
-                <li><b>Cargo Adicional:</b> Se aplicará un cargo recurrente de <b>$50.00 MXN + IVA</b> a su suscripción mensual por cada terminal adicional registrada. Este monto se verá reflejado en su próximo estado de cuenta.</li>
+                <li><b>Cargo Adicional:</b> Se aplicará un cargo recurrente de <b>$50.00 MXN</b> a su suscripción mensual por cada terminal adicional registrada. Este monto se verá reflejado en su próximo estado de cuenta.</li>
                 <li><b>Activación:</b> La terminal se activará de forma inmediata tras la confirmación, permitiendo el acceso completo a las funciones de Modula Punto de Venta.</li>
                 <li><b>Facturación:</b> El cobro es recurrente y se mantendrá activo mientras la terminal no sea dada de baja desde su panel de administración de cuenta en el portal de Addsy.</li>
                 <li><b>Gestión:</b> Puede administrar, desactivar o eliminar sus terminales en cualquier momento desde la sección "Mi Suscripción" > "Administrar Terminales" en su cuenta.</li>

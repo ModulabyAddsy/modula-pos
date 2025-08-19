@@ -3,6 +3,7 @@ import webbrowser
 import os
 import uuid
 import psutil
+from pathlib import Path
 from PySide6.QtWidgets import QMessageBox, QInputDialog, QApplication
 from PySide6.QtCore import QTimer, QObject, Signal, QThread
 from src.ui.main_window import MainWindow
@@ -57,60 +58,43 @@ class StartupWorker(QObject):
             id_sucursal = respuesta_verificacion['id_sucursal']
             id_empresa = respuesta_verificacion['id_empresa']
             
-            # 1. Obtener la lista de archivos locales
-            archivos_locales = get_local_db_file_info(id_empresa, id_sucursal)
+            # --- ETAPA 3: PUSH DE DATOS LOCALES PRIMERO ---
+            self.progress.emit("Enviando cambios locales...", 30)
+            from src.core.local_storage import get_pending_sync_records
+            pending_pushes = get_pending_sync_records(id_empresa)
             
-            # 2. Obtener el plan de sincronización del backend
-            plan_sync = self.api_client.check_sync_status(id_sucursal, archivos_locales)
+            if not pending_pushes:
+                self.progress.emit("No hay cambios locales pendientes.", 40)
+            else:
+                for i, push_data in enumerate(pending_pushes):
+                    progreso = 30 + int((i / len(pending_pushes)) * 20)
+                    self.progress.emit(f"Sincronizando {push_data['table_name']}...", progreso)
+                    self.api_client.push_records(push_data)
+
+            # --- ETAPAS 1 y 2: INICIALIZAR EN LA NUBE ---
+            self.progress.emit("Preparando la nube...", 50)
+            cloud_plan = self.api_client.initialize_sync()
             
-            # 3. Ejecutar el plan de acciones
-            resumen_sync = []
-            ruta_base_empresa = DB_DIR / plan_sync.get('id_empresa')
-
-            for i, accion in enumerate(plan_sync.get("acciones", [])):
-                progreso_actual = 70 + int((i / len(plan_sync['acciones'])) * 25)
-                tipo = accion.get('accion')
-
-                if tipo == "ensure_dir":
-                    ruta_a_crear = ruta_base_empresa / accion['ruta_relativa']
-                    os.makedirs(ruta_a_crear, exist_ok=True)
-
-                elif tipo in ["descargar_db_modelo", "actualizar_datos"]:
-                    ruta_destino = ruta_base_empresa / accion['destino_relativo']
-                    nombre_archivo = os.path.basename(ruta_destino)
-                    self.progress.emit(f"Descargando: {nombre_archivo}", progreso_actual)
-                    origen = accion.get('origen_cloud') or accion.get('key_cloud')
-                    if self.api_client.descargar_archivo(origen, ruta_destino):
-                        resumen_sync.append(f"'{nombre_archivo}' descargado/actualizado.")
-
-                elif tipo == "migrar_esquema":
-                    db_path = ruta_base_empresa / accion['db_relativa']
-                    nombre_db = os.path.basename(db_path)
-                    self.progress.emit(f"Migrando {nombre_db}", progreso_actual)
-                    # Aquí usamos nuestro nuevo helper
-                    from src.core.local_storage import ejecutar_migracion_sql
-                    if ejecutar_migracion_sql(db_path, accion['comandos_sql']):
-                        resumen_sync.append(f"Esquema de '{nombre_db}' actualizado.")
-                    else:
-                        raise Exception(f"Fallo al migrar el esquema de {nombre_db}")
-
-                elif tipo == "subir_db":
-                    ruta_origen = ruta_base_empresa / accion['origen_relativo']
-                    nombre_archivo = os.path.basename(ruta_origen)
-                    self.progress.emit(f"Subiendo: {nombre_archivo}", progreso_actual)
-                    
-                    # Obtenemos el hash base que nos envió el plan
-                    hash_base_nube = accion.get('hash_base') # Puede ser None si el archivo no existía en la nube
-                    
-                    # Y aquí le pasamos el tercer argumento que faltaba
-                    if self.api_client.subir_archivo(ruta_origen, accion['key_cloud'], hash_base_nube):
-                        resumen_sync.append(f"'{nombre_archivo}' sincronizado con la nube.")
-
-            if not resumen_sync:
-                resumen_sync.append("Todo está sincronizado.")
+            # --- ETAPA 4: PULL DE LA VERSIÓN FINAL ---
+            self.progress.emit("Descargando datos actualizados...", 70)
+            files_to_pull = cloud_plan.get("files_to_pull", [])
+            ruta_base_local = DB_DIR
             
-            self.progress.emit("¡Listo!", 100)
-            self.finished.emit(respuesta_verificacion, resumen_sync)
+            for i, key_path in enumerate(files_to_pull):
+                progreso = 70 + int((i / len(files_to_pull)) * 25)
+                nombre_archivo = Path(key_path).name
+                self.progress.emit(f"Descargando {nombre_archivo}...", progreso)
+                
+                ruta_destino_local = ruta_base_local / key_path
+                self.api_client.pull_db_file(key_path, ruta_destino_local)
+
+            # --- LIMPIEZA FINAL ---
+            from src.core.local_storage import mark_records_as_synced
+            mark_records_as_synced(id_empresa)
+            
+            self.progress.emit("¡Sincronización completa!", 100)
+            self.finished.emit(respuesta_verificacion, ["Sincronización v2.0 completada exitosamente."])
+
 
         except Exception as e:
             import traceback

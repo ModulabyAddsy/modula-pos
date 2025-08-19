@@ -309,3 +309,38 @@ class ApiClient:
                 raise ConnectionAbortedError("conflict")
             print(f"❌ Error al subir {os.path.basename(ruta_local)}: {e}")
             return False
+        
+    def initialize_sync(self) -> dict:
+        """Llama al backend para preparar la nube (Etapas 1 y 2)."""
+        if not self.auth_token: raise Exception("Autenticación requerida.")
+        url = f"{self.base_url}/sync/initialize"
+        headers = {"Authorization": f"Bearer {self.auth_token}"}
+        with httpx.Client() as client:
+            response = client.post(url, headers=headers, timeout=120.0) # Timeout más largo
+        response.raise_for_status()
+        return response.json()
+
+    def push_records(self, push_data: dict) -> dict:
+        """Envía un paquete de registros locales a la nube para fusionarlos."""
+        if not self.auth_token: raise Exception("Autenticación requerida.")
+        url = f"{self.base_url}/sync/push-records"
+        headers = {"Authorization": f"Bearer {self.auth_token}"}
+        with httpx.Client() as client:
+            response = client.post(url, headers=headers, json=push_data, timeout=120.0)
+        response.raise_for_status()
+        return response.json()
+
+    def pull_db_file(self, key_path: str, local_destination: Path):
+        """Descarga un archivo de DB desde el endpoint de pull."""
+        if not self.auth_token: raise Exception("Autenticación requerida.")
+        url = f"{self.base_url}/sync/pull-db/{key_path}"
+        headers = {"Authorization": f"Bearer {self.auth_token}"}
+        
+        local_destination.parent.mkdir(parents=True, exist_ok=True)
+        
+        with httpx.stream("GET", url, headers=headers, timeout=120.0) as response:
+            response.raise_for_status()
+            with open(local_destination, "wb") as f:
+                for chunk in response.iter_bytes():
+                    f.write(chunk)
+        print(f"✅ Descarga completa: {key_path}")
