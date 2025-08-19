@@ -16,6 +16,7 @@ class ApiClient:
     def set_auth_token(self, token: str):
         """Almacena el token de autenticación para futuras peticiones."""
         self.auth_token = token
+        print(f"DEBUG: Token guardado en ApiClient: {self.auth_token}")
         print("Token de sesión guardado.")
 
     # --- FUNCIÓN NUEVA AÑADIDA ---
@@ -312,13 +313,28 @@ class ApiClient:
         
     def initialize_sync(self) -> dict:
         """Llama al backend para preparar la nube (Etapas 1 y 2)."""
-        if not self.auth_token: raise Exception("Autenticación requerida.")
+        print(f"DEBUG: Token a punto de ser usado en initialize_sync: {self.auth_token}")
+        # 1. ✅ AÑADIR VERIFICACIÓN: Nos aseguramos de que el token exista antes de hacer la llamada.
+        if not self.auth_token:
+            raise Exception("Intento de llamar a 'initialize_sync' sin un token de autenticación.")
+        
         url = f"{self.base_url}/sync/initialize"
+        
+        # 2. ✅ LÍNEA CRÍTICA: Construir la cabecera de autorización.
+        # Esto le dice al backend "Soy yo, y aquí está mi credencial (el token)".
         headers = {"Authorization": f"Bearer {self.auth_token}"}
-        with httpx.Client() as client:
-            response = client.post(url, headers=headers, timeout=120.0) # Timeout más largo
-        response.raise_for_status()
-        return response.json()
+        
+        try:
+            with httpx.Client() as client:
+                # 3. ✅ AÑADIR headers=headers a la petición.
+                response = client.post(url, headers=headers, timeout=120.0)
+            
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            # Esto nos dará más detalles en caso de otro error.
+            print(f"Error en la petición a {url}: {e.response.text}")
+            raise e
 
     def push_records(self, push_data: dict) -> dict:
         """Envía un paquete de registros locales a la nube para fusionarlos."""

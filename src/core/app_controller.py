@@ -40,6 +40,7 @@ class StartupWorker(QObject):
 
             if local_id and local_id == hardware_id:
                 respuesta_verificacion = self.api_client.verificar_terminal(hardware_id)
+                print(f"DEBUG: Respuesta de verificación recibida: {respuesta_verificacion}")
             else:
                 try:
                     self.api_client.buscar_terminal_por_hardware(hardware_id)
