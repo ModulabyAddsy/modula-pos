@@ -1,0 +1,381 @@
+/* src/assets/qss/style.qss */
+
+/* Estilo general para la ventana y fuentes */
+QWidget {
+    font-family: 'Inter', sans-serif;
+    color: #374151; /* gray-700 */
+    font-size: 14px;
+}
+
+/* Contenedor principal que simula la "card" */
+#AuthView, #MainWindow {
+    background-color: #ffffff;
+}
+
+/* Inputs de formulario */
+QLineEdit {
+    background-color: #F9FAFB;
+    border: 1px solid #D1D5DB;
+    border-radius: 8px;
+    padding: 8px 10px; /* 8px vertical, 10px horizontal */
+    color: #374151;
+}
+
+QLineEdit:focus {
+    border: 2px solid #3B82F6; /* blue-500 */
+}
+
+/* Botón Primario (Login, Registrar) */
+QPushButton#primary {
+    background-color: #2563EB; /* blue-600 */
+    color: white;
+    font-weight: 600;
+    border-radius: 8px;
+    padding: 12px;
+    border: none;
+}
+
+QPushButton#primary:hover {
+    background-color: #1D4ED8; /* blue-700 */
+}
+
+/* Títulos */
+QLabel#h1 {
+    font-size: 24px;
+    font-weight: 700;
+    color: #1F2937; /* gray-800 */
+}
+
+QLabel#h2 {
+    font-size: 18px;
+    font-weight: 600;
+    color: #374151; /* gray-700 */
+}
+
+/* Pestañas (Login / Registro) */
+QTabBar::tab {
+    padding: 10px;
+    font-weight: 600;
+    font-size: 13px;
+    color: #6B7281; /* gray-500 */
+    border-bottom: 2px solid transparent;
+}
+
+QTabBar::tab:selected {
+    color: #2563EB; /* blue-600 */
+    border-bottom: 2px solid #2563EB; /* blue-600 */
+}
+
+QTabWidget::pane {
+    border: none;
+}
+
+/* Botón con estilo de enlace (para 'Recuperar Contraseña') */
+QPushButton#link-style-button {
+    background-color: transparent; /* Sin fondo */
+    border: none;                  /* Sin borde */
+    color: #3B82F6;               /* Color azul (blue-500) */
+    text-align: right;             /* Alineado a la derecha, debajo del input */
+    padding: 0px;                  /* Sin relleno extra */
+    text-decoration: underline;    /* Subrayado */
+}
+
+QPushButton#link-style-button:hover {
+    color: #1D4ED8; /* Azul más oscuro al pasar el mouse (blue-700) */
+}
+
+#LoadingView {
+    background-color: #ffffff; /* Fondo blanco */
+}
+
+#LoadingTitle {
+    font-size: 28px;
+    font-weight: bold;
+    color: #333;
+    /* Si decides no usar este label, puedes borrar esta sección */
+}
+
+#LoadingStatus {
+    font-size: 14px;
+    color: #555; /* Un gris sutil */
+}
+
+QProgressBar {
+    border: none; /* Sin borde */
+    background-color: #e0e0e0; /* Color de la barra de fondo */
+    border-radius: 5px; /* Bordes redondeados */
+    height: 10px; /* Altura de la barra */
+}
+
+QProgressBar::chunk {
+    background-color: #0078d4; /* Color azul de progreso */
+    border-radius: 5px; /* Bordes redondeados para el progreso */
+}
+
+#AuthLeftPanel {
+    background-color: #0078d4; /* Azul de Modula */
+}
+
+#AuthTagline {
+    color: white;
+    font-size: 16px;
+    padding-top: 10px;
+}
+
+#AuthRightPanel {
+    background-color: #fcfcfc; /* Un blanco ligeramente cálido */
+}
+
+#AuthTitle {
+    font-size: 24px;
+    font-weight: bold;
+    color: #333;
+}
+
+#AuthErrorLabel {
+    color: #c0392b; /* Rojo para errores */
+    font-size: 12px;
+}
+
+QLineEdit {
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 4px;
+    font-size: 14px;
+    background-color: white;
+    min-height: 20px; /* <-- AÑADE ESTA LÍNEA */
+}
+
+QLineEdit:focus {
+    border: 1px solid #0078d4; /* Resaltado azul al seleccionar */
+}
+
+#LoginButton {
+    background-color: #0078d4;
+    color: white;
+    font-weight: bold;
+    font-size: 14px;
+    border: none;
+    border-radius: 4px;
+    padding: 10px;
+}
+
+#LoginButton:hover {
+    background-color: #005a9e; /* Un azul más oscuro al pasar el ratón */
+}
+
+#SecondaryLink {
+    background-color: transparent;
+    border: none;
+    color: #0078d4;
+    font-size: 12px;
+    text-decoration: underline;
+}
+
+#SecondaryLink:hover {
+    color: #005a9e;
+}
+
+/* === ESTILOS PARA LA VISTA DE AUTENTICACIÓN === */
+#AuthRightPanel {
+    background-color: #f3f4f6; /* Gris claro de fondo */
+}
+
+#AuthFormCard {
+    background-color: white;
+    border-radius: 12px;
+}
+
+#AuthTitle {
+    font-size: 24px;
+    font-weight: bold;
+    color: #1f2937; /* Gris oscuro para texto */
+}
+
+#PoweredByText {
+    color: #6b7280; /* Gris medio */
+    font-size: 12px;
+}
+
+/* Contenedor del campo de texto con ícono */
+#IconLineEdit {
+    border: 1px solid #d1d5db; /* Borde gris claro */
+    border-radius: 6px;
+    background-color: white;
+}
+#IconLineEdit:focus-within {
+    border: 1px solid #0078d4; /* Resaltado azul al enfocar */
+}
+
+/* Campo de texto real, sin borde ni fondo */
+#TransparentLineEdit {
+    border: none;
+    background-color: transparent;
+    font-size: 14px;
+}
+
+/* Botón principal */
+#LoginButton {
+    background-color: #0078d4;
+    color: white;
+    font-weight: bold;
+    font-size: 14px;
+    border: none;
+    border-radius: 6px;
+    padding: 12px;
+    min-height: 24px;
+}
+#LoginButton:hover {
+    background-color: #005a9e;
+}
+
+/* Checkbox */
+QCheckBox {
+    font-size: 12px;
+    color: #4b5563;
+}
+
+/* Enlaces secundarios */
+#SecondaryLink {
+    background-color: transparent;
+    border: none;
+    color: #0078d4;
+    font-size: 12px;
+    text-decoration: underline;
+}
+#SecondaryLink:hover {
+    color: #005a9e;
+}
+#SecondaryLinkRed {
+    background-color: transparent;
+    border: none;
+    color: #dc2626; /* Rojo para acciones como 'olvidé contraseña' */
+    font-size: 12px;
+}
+#SecondaryLinkRed:hover {
+    color: #b91c1c;
+}
+
+#VersionLabel {
+    color: #9ca3af; /* Gris claro para la versión */
+    font-size: 10px;
+    padding: 5px;
+}
+
+#AuthLeftPanel {
+    /* --- CORREGIDO: Fondo blanco y borde derecho --- */
+    background-color: white;
+    border-right: 1px solid #e5e7eb; /* Un gris muy claro para la separación */
+}
+
+#AuthBrandText {
+    /* --- CORREGIDO: Letras en color azul --- */
+    color: #0078d4;
+    font-size: 48px;
+    font-weight: bold;
+}
+
+#AuthTagline {
+    /* --- CORREGIDO: Letras en color azul --- */
+    color: #005a9e; /* Un azul más oscuro y sutil */
+    font-size: 16px;
+    font-style: italic;
+}
+
+#CustomDialog {
+    background-color: #ffffff;
+}
+
+#DialogTitle {
+    font-size: 18px;
+    font-weight: bold;
+    color: #1f2937; /* Gris oscuro */
+}
+
+#DialogInfoText {
+    font-size: 14px;
+    color: #6b7280; /* Gris medio */
+}
+
+/* Estilo para el botón secundario "Cancelar" */
+#CustomDialog QPushButton {
+    border: 1px solid #d1d5db; /* Borde gris claro */
+    border-radius: 6px;
+    padding: 8px 16px;
+    background-color: white;
+    font-size: 14px;
+}
+
+#CustomDialog QPushButton:hover {
+    background-color: #f9fafb; /* Un gris muy claro al pasar el ratón */
+}
+
+/* Sobrescribimos el estilo para el botón primario "Enviar" */
+#CustomDialog QPushButton#LoginButton {
+    background-color: #0078d4;
+    color: white;
+    font-weight: bold;
+    border: none;
+}
+
+#CustomDialog QPushButton#LoginButton:hover {
+    background-color: #005a9e;
+}
+
+#NewTerminalDialog {
+    background-color: #FFFFFF; /* Fondo blanco */
+}
+
+#NewTerminalDialog #titleLabel {
+    font-size: 18px;
+    font-weight: bold;
+    color: #1F2937; /* Gris oscuro para el texto principal */
+}
+
+#NewTerminalDialog #subtitleLabel {
+    font-size: 14px;
+    color: #4B5563; /* Gris un poco más claro */
+}
+
+#NewTerminalDialog #termsTextEdit {
+    background-color: #F3F4F6; /* Fondo gris claro para el recuadro */
+    border: 1px solid #D1D5DB;
+    border-radius: 8px;
+    font-size: 12px;
+    padding: 10px;
+}
+
+#NewTerminalDialog #acceptCheckbox {
+    font-size: 13px;
+    color: #374151;
+}
+
+#NewTerminalDialog #acceptButton {
+    background-color: #3B82F6; /* Azul primario de Modula/Addsy */
+    color: white;
+    font-weight: bold;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 8px;
+}
+
+#NewTerminalDialog #acceptButton:hover {
+    background-color: #2563EB; /* Azul más oscuro al pasar el mouse */
+}
+
+#NewTerminalDialog #acceptButton:disabled {
+    background-color: #9CA3AF; /* Gris cuando está deshabilitado */
+}
+
+#NewTerminalDialog #cancelButton {
+    background-color: transparent;
+    color: #4B5563;
+    border: 1px solid #D1D5DB;
+    padding: 10px 20px;
+    border-radius: 8px;
+}
+
+#NewTerminalDialog #cancelButton:hover {
+    background-color: #F9FAFB;
+    border-color: #9CA3AF;
+}
