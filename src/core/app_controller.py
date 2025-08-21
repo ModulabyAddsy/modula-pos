@@ -210,20 +210,46 @@ class AppController(QObject):
             return str(uuid.uuid4())
 
     def _manejar_respuesta_verificacion(self, respuesta: dict):
-        if respuesta.get("status") == "ok" and "access_token" in respuesta:
+        status = respuesta.get("status")
+
+        if status == "ok" and "access_token" in respuesta:
             print("Verificación exitosa. Iniciando sesión automáticamente.")
             self.api_client.set_auth_token(respuesta["access_token"])
             self.main_window.mostrar_vista_dashboard()
-        elif respuesta.get("status") == "location_mismatch":
+        
+        # --- ¡NUEVA LÓGICA PARA SUSCRIPCIÓN VENCIDA! ---
+        elif status == "subscription_expired":
+            print("Suscripción vencida. Mostrando panel de pago.")
+            url_pago = respuesta.get("payment_url")
+            mensaje = respuesta.get("message", "Tu suscripción ha vencido.")
+            
+            # 1. Mostramos un diálogo informativo al usuario
+            QMessageBox.warning(self.main_window, "Suscripción Vencida", 
+                                f"{mensaje}\n\nSerás redirigido a nuestro portal de pagos para regularizar tu situación.")
+            
+            # 2. Abrimos el navegador web con la URL del portal de Stripe
+            if url_pago:
+                webbrowser.open(url_pago)
+            
+            # 3. Cerramos la aplicación de escritorio, ya que no puede continuar
+            self.app.quit()
+            
+        elif status == "location_mismatch":
             print("Conflicto de ubicación detectado. Se requiere login para resolver.")
             QMessageBox.warning(self.main_window, "Conflicto de Ubicación", "Hemos detectado que estás en una nueva ubicación.\n\nPor favor, inicia sesión con tu cuenta para autorizar este cambio.")
             self.respuesta_conflicto = respuesta
-            self.main_window.auth_view.login_solicitado.disconnect()
+            
+            # Desconectamos cualquier conexión anterior para evitar duplicados
+            try: self.main_window.auth_view.login_solicitado.disconnect()
+            except RuntimeError: pass
+
             self.main_window.auth_view.login_solicitado.connect(self.handle_login_para_resolver_conflicto)
             self.main_window.mostrar_vista_auth()
+
         else:
             error_detail = respuesta.get("detail", "Error desconocido.")
             print(f"Fallo en verificación: {error_detail}.")
+            QMessageBox.critical(self.main_window, "Error de Verificación", error_detail)
             self.main_window.mostrar_vista_auth()
 
     def handle_account_login_and_activate(self, email: str, password: str):
