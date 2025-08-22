@@ -30,10 +30,7 @@ class StartupWorker(QObject):
         """El trabajo pesado que se ejecuta en el hilo secundario."""
         try:
             # === PASO 1 y 2: VERIFICACIÓN Y PLANIFICACIÓN (como ya lo tienes) ===
-            self.progress.emit("Buscando actualizaciones...", 10)
-            time.sleep(5)
-            
-            self.progress.emit("Verificando terminal...", 30)
+            self.progress.emit("Verificando terminal...", 10)
             hardware_id = self.controller._generar_id_estable()
             local_id = get_id_terminal()
             respuesta_verificacion = None

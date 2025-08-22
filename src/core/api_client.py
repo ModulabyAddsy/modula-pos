@@ -25,7 +25,7 @@ class ApiClient:
         Envía los datos de un nuevo usuario al backend para pre-registrarlo
         y obtener la URL de checkout de Stripe.
         """
-        url = f"{self.base_url}/auth/registrar-cuenta"
+        url = f"{self.base_url}/api/v1/auth/registrar-cuenta"
         try:
             with httpx.Client() as client:
                 response = client.post(url, json=datos_registro, timeout=15.0)
@@ -39,7 +39,7 @@ class ApiClient:
 
     def login(self, correo: str, contrasena: str) -> dict:
         """Envía las credenciales para iniciar sesión y guarda el token si es exitoso."""
-        url = f"{self.base_url}/auth/login"
+        url = f"{self.base_url}/api/v1/auth/login"
         
         # --- CORRECCIÓN AQUÍ ---
         # El backend espera un JSON con las claves "correo" y "contrasena",
@@ -65,7 +65,7 @@ class ApiClient:
         
     def buscar_terminal_por_hardware(self, hardware_id: str) -> dict:
         """Busca si una terminal con un ID de hardware ya existe en el backend."""
-        url = f"{self.base_url}/terminales/buscar-por-hardware"
+        url = f"{self.base_url}/api/v1/terminales/buscar-por-hardware"
         payload = {"id_terminal": hardware_id}
         try:
             with httpx.Client() as client:
@@ -85,7 +85,7 @@ class ApiClient:
     
     def verificar_terminal(self, terminal_id: str) -> dict:
         """Verifica una terminal en el backend."""
-        url = f"{self.base_url}/auth/verificar-terminal"
+        url = f"{self.base_url}/api/v1/auth/verificar-terminal"
         payload = {"id_terminal": terminal_id}
         try:
             with httpx.Client() as client:
@@ -101,7 +101,7 @@ class ApiClient:
         """Llama al endpoint para crear una nueva sucursal."""
         if not self.auth_token:
             raise Exception("Se requiere autenticación para realizar esta acción.")
-        url = f"{self.base_url}/sucursales/"
+        url = f"{self.base_url}/api/v1/sucursales/"
         headers = {"Authorization": f"Bearer {self.auth_token}"}
         payload = {"nombre": nombre_sucursal}
         try:
@@ -120,7 +120,7 @@ class ApiClient:
         if not self.auth_token:
             raise Exception("Se requiere autenticación para realizar esta acción.")
         
-        url = f"{self.base_url}/terminales/asignar-a-sucursal"
+        url = f"{self.base_url}/api/v1/terminales/asignar-a-sucursal"
         headers = {"Authorization": f"Bearer {self.auth_token}"}
         payload = {"id_terminal_origen": id_terminal, "id_sucursal_destino": id_sucursal}
         
@@ -140,7 +140,7 @@ class ApiClient:
         if not self.auth_token:
             raise Exception("Se requiere autenticación para realizar esta acción.")
 
-        url = f"{self.base_url}/terminales/crear-sucursal-y-asignar"
+        url = f"{self.base_url}/api/v1/terminales/crear-sucursal-y-asignar"
         headers = {"Authorization": f"Bearer {self.auth_token}"}
         payload = {"id_terminal_origen": id_terminal, "nombre_nueva_sucursal": nombre_sucursal}
         
@@ -159,7 +159,7 @@ class ApiClient:
         """Obtiene la lista de sucursales del usuario autenticado."""
         if not self.auth_token:
             raise Exception("Se requiere autenticación.")
-        url = f"{self.base_url}/sucursales/mi-cuenta"
+        url = f"{self.base_url}/api/v1/sucursales/mi-cuenta"
         headers = {"Authorization": f"Bearer {self.auth_token}"}
         try:
             with httpx.Client() as client:
@@ -174,7 +174,7 @@ class ApiClient:
         if not self.auth_token:
             raise Exception("Se requiere autenticación para obtener la lista de terminales.")
         
-        url = f"{self.base_url}/terminales/mi-cuenta"
+        url = f"{self.base_url}/api/v1/terminales/mi-cuenta"
         headers = {"Authorization": f"Bearer {self.auth_token}"}
         
         try:
@@ -195,7 +195,7 @@ class ApiClient:
         if not self.auth_token:
             raise Exception("Se requiere autenticación para registrar una terminal.")
         
-        url = f"{self.base_url}/terminales/"
+        url = f"{self.base_url}/api/v1/terminales/"
         headers = {"Authorization": f"Bearer {self.auth_token}"}
         
         try:
@@ -211,7 +211,7 @@ class ApiClient:
             raise Exception("Error de conexión al intentar registrar la terminal.")
         
     def check_activation_status(self, claim_token: str) -> dict:
-        url = f"{self.base_url}/auth/check-activation-status/{claim_token}"
+        url = f"{self.base_url}/api/v1/auth/check-activation-status/{claim_token}"
         try:
             with httpx.Client() as client:
                 response = client.get(url, timeout=10.0)
@@ -225,7 +225,7 @@ class ApiClient:
     
     def solicitar_reseteo_contrasena(self, email: str) -> dict:
         """Llama al endpoint para solicitar un reseteo de contraseña."""
-        url = f"{self.base_url}/auth/solicitar-reseteo"
+        url = f"{self.base_url}/api/v1/auth/solicitar-reseteo"
         payload = {"email": email}
         try:
             with httpx.Client() as client:
@@ -244,7 +244,7 @@ class ApiClient:
         if not self.auth_token:
             raise Exception("Se requiere autenticación para la sincronización.")
         
-        url = f"{self.base_url}/sync/check"
+        url = f"{self.base_url}/api/v1/sync/check"
         headers = {"Authorization": f"Bearer {self.auth_token}"}
         
         payload_archivos = [
@@ -268,7 +268,7 @@ class ApiClient:
     def descargar_archivo(self, key_en_la_nube: str, ruta_local_destino: Path):
         """Descarga un archivo específico desde la nube y lo guarda localmente."""
         if not self.auth_token: raise Exception("Se requiere autenticación para descargar.")
-        url = f"{self.base_url}/sync/download/{key_en_la_nube}"
+        url = f"{self.base_url}/api/v1/sync/pull-db/{key_en_la_nube}"
         headers = {"Authorization": f"Bearer {self.auth_token}"}
         try:
             # ✅ LÍNEA CLAVE: Asegura que el directorio padre exista antes de escribir.
@@ -291,22 +291,24 @@ class ApiClient:
         """
         Sube un archivo a la nube, incluyendo el hash de la versión base para detectar conflictos.
         """
+        if not self.auth_token:
+            raise Exception("Autenticación requerida.")
+        url = f"{self.base_url}/api/v1/sync/upload/{key_cloud}"
+        headers = {'Authorization': f'Bearer {self.auth_token}', 'X-Base-Version-Hash': hash_base}
         try:
             with open(ruta_local, 'rb') as f:
-                # Añadimos el hash base como un header personalizado
-                headers = {'Authorization': f'Bearer {self.token}', 'X-Base-Version-Hash': hash_base}
-                response = self.client.post(f"{self.base_url}/sync/upload/{key_cloud}", files={'file': f}, headers=headers)
+                with httpx.Client() as client:
+                    response = client.post(url, files={'file': f}, headers=headers)
                 
-                if response.status_code == 409: # Conflicto detectado
-                    raise Exception("conflict")
+            if response.status_code == 409:
+                raise Exception("Conflicto detectado")
 
-                response.raise_for_status()
-                print(f"✅ Subida completa: {os.path.basename(ruta_local)}")
-                return True
+            response.raise_for_status()
+            print(f"✅ Subida completa: {os.path.basename(ruta_local)}")
+            return True
         except Exception as e:
-            if str(e) == "conflict":
+            if "Conflicto detectado" in str(e):
                 print(f"⚠️  Conflicto detectado para {os.path.basename(ruta_local)}. Se requiere sincronización.")
-                # Relanzamos una excepción específica o un código para que el controller la maneje
                 raise ConnectionAbortedError("conflict")
             print(f"❌ Error al subir {os.path.basename(ruta_local)}: {e}")
             return False
@@ -318,7 +320,7 @@ class ApiClient:
         if not self.auth_token:
             raise Exception("Intento de llamar a 'initialize_sync' sin un token de autenticación.")
         
-        url = f"{self.base_url}/sync/initialize"
+        url = f"{self.base_url}/api/v1/sync/initialize"
         
         # 2. ✅ LÍNEA CRÍTICA: Construir la cabecera de autorización.
         # Esto le dice al backend "Soy yo, y aquí está mi credencial (el token)".
@@ -339,7 +341,7 @@ class ApiClient:
     def push_records(self, push_data: dict) -> dict:
         """Envía un paquete de registros locales a la nube para fusionarlos."""
         if not self.auth_token: raise Exception("Autenticación requerida.")
-        url = f"{self.base_url}/sync/push-records"
+        url = f"{self.base_url}/api/v1/sync/push-records"
         headers = {"Authorization": f"Bearer {self.auth_token}"}
         with httpx.Client() as client:
             response = client.post(url, headers=headers, json=push_data, timeout=120.0)
@@ -349,7 +351,7 @@ class ApiClient:
     def pull_db_file(self, key_path: str, local_destination: Path):
         """Descarga un archivo de DB desde el endpoint de pull."""
         if not self.auth_token: raise Exception("Autenticación requerida.")
-        url = f"{self.base_url}/sync/pull-db/{key_path}"
+        url = f"{self.base_url}/api/v1/sync/pull-db/{key_path}"
         headers = {"Authorization": f"Bearer {self.auth_token}"}
         
         local_destination.parent.mkdir(parents=True, exist_ok=True)
