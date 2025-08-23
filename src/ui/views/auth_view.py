@@ -294,7 +294,22 @@ class AuthView(QWidget):
         self.error_label.setVisible(True)
 
     def clear_inputs(self):
+        """Limpia todos los campos de entrada en ambos formularios."""
+        # Limpiar formulario de login
         if hasattr(self, 'login_form'):
             self.login_form.email_input.line_edit.clear()
             self.login_form.password_input.line_edit.clear()
+            self.login_form.show_password_checkbox.setChecked(False)
+
+        # Limpiar formulario de registro
+        if hasattr(self, 'register_form'):
+            self.register_form.nombre_completo.clear()
+            self.register_form.correo.clear()
+            self.register_form.contrasena.clear()
+            self.register_form.telefono.clear()
+            self.register_form.fecha_nacimiento.setDate(QDate(2000, 1, 1))
+            self.register_form.nombre_empresa.clear()
+            self.register_form.rfc.clear()
+        
+        # Ocultar cualquier mensaje de error
         self.error_label.setVisible(False)

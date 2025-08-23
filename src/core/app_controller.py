@@ -99,6 +99,66 @@ class StartupWorker(QObject):
             traceback.print_exc()
             self.finished.emit(f"Error crítico en el arranque: {e}", [])
 
+class RegisterWorker(QObject):
+    """Ejecuta el proceso de registro en un hilo secundario."""
+    finished = Signal(dict)
+    progress = Signal(str, int) # <-- ¡SEÑAL AÑADIDA!
+
+    def __init__(self, controller_ref, user_data: dict):
+        super().__init__()
+        self.controller = controller_ref
+        self.api_client = controller_ref.api_client
+        self.user_data = user_data
+
+    def run(self):
+        """El trabajo pesado que se ejecuta en el hilo secundario."""
+        try:
+            self.progress.emit("Registrando cuenta...", 10) # <-- La primera emisión
+            hardware_id = self.controller._generar_id_estable()
+            self.user_data["id_terminal"] = hardware_id
+            
+            self.controller.claim_token = str(uuid.uuid4())
+            self.user_data["claim_token"] = self.controller.claim_token
+            
+            respuesta = self.api_client.registrar_cuenta(self.user_data)
+            self.finished.emit(respuesta)
+        except Exception as e:
+            self.finished.emit({"error": str(e)})
+        
+class LoginWorker(QObject):
+    """Ejecuta el proceso de login y activación en un hilo secundario."""
+    finished = Signal(dict)
+    progress = Signal(str, int) # <-- ¡SEÑAL AÑADIDA!
+
+    def __init__(self, controller_ref, email: str, password: str):
+        super().__init__()
+        self.controller = controller_ref
+        self.api_client = controller_ref.api_client
+        self.email = email
+        self.password = password
+
+    def run(self):
+        """El trabajo pesado que se ejecuta en el hilo secundario."""
+        try:
+            self.progress.emit("Verificando credenciales...", 10) # <-- La primera emisión
+            print(f"Autenticando cuenta Addsy: {self.email}...")
+            self.api_client.login(self.email, self.password)
+            
+            print("Cuenta autenticada. Verificando si esta PC ya está registrada como terminal...")
+            hardware_id = self.controller._generar_id_estable()
+            terminales_existentes = self.api_client.get_mis_terminales()
+            terminal_ya_registrada = any(t['id_terminal'] == hardware_id for t in terminales_existentes)
+            
+            if terminal_ya_registrada:
+                print(f"Este hardware ya está registrado. Vinculando con ID: {hardware_id}")
+                save_terminal_id(hardware_id)
+                self.finished.emit({"status": "ok", "action": "restart"})
+            else:
+                print("No se encontró una terminal para este hardware. Iniciando flujo de creación.")
+                self.finished.emit({"status": "ok", "action": "new_terminal"})
+
+        except Exception as e:
+            self.finished.emit({"status": "error", "message": f"Error en el proceso de activación: {e}"})
 
 class AppController(QObject):
     """Controla todo el flujo de la aplicación."""
@@ -250,23 +310,37 @@ class AppController(QObject):
             self.main_window.mostrar_vista_auth()
 
     def handle_account_login_and_activate(self, email: str, password: str):
-        try:
-            print(f"Autenticando cuenta Addsy: {email}...")
-            self.api_client.login(email, password)
-            print("Cuenta autenticada. Verificando si esta PC ya está registrada como terminal...")
-            hardware_id = self._generar_id_estable()
-            terminales_existentes = self.api_client.get_mis_terminales()
-            terminal_ya_registrada = any(t['id_terminal'] == hardware_id for t in terminales_existentes)
-            if terminal_ya_registrada:
-                print(f"Este hardware ya está registrado. Vinculando con ID: {hardware_id}")
-                save_terminal_id(hardware_id)
+        """Inicia el proceso de login y activación en un hilo secundario."""
+        self.main_window.mostrar_vista_carga()
+        self.main_window.auth_view.clear_inputs()
+        self.thread = QThread()
+        self.worker = LoginWorker(self, email, password)
+        self.worker.moveToThread(self.thread)
+        self.thread.started.connect(self.worker.run)
+        self.worker.progress.connect(self.main_window.loading_view.update_status) # <-- Conexión a la nueva señal
+        self.worker.finished.connect(self.handle_login_result)
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+        self.thread.start()
+
+        
+    def handle_login_result(self, result: dict):
+        """Maneja el resultado del proceso de login."""
+        status = result.get("status")
+        
+        if status == "error":
+            self.show_error(result.get("message", "Error desconocido."))
+            self.main_window.mostrar_vista_auth() # Regresamos al login si hay error
+            return
+
+        if status == "ok":
+            action = result.get("action")
+            if action == "restart":
                 QMessageBox.information(self.main_window, "Terminal Vinculada", "Este equipo ha sido vinculado exitosamente a tu terminal existente.\n\nLa aplicación se reiniciará para aplicar la configuración.")
                 self._iniciar_arranque_inteligente()
-            else:
-                print("No se encontró una terminal para este hardware. Iniciando flujo de creación.")
+            elif action == "new_terminal":
                 self.handle_nueva_terminal()
-        except Exception as e:
-            self.show_error(f"Error en el proceso de activación: {e}")
 
     def handle_nueva_terminal(self):
         try:
@@ -350,21 +424,34 @@ class AppController(QObject):
             self.show_error(f"Error resolviendo conflicto: {e}")
 
     def handle_register(self, user_data: dict):
-        try:
-            hardware_id = self._generar_id_estable()
-            user_data["id_terminal"] = hardware_id
-            self.claim_token = str(uuid.uuid4())
-            user_data["claim_token"] = self.claim_token
-            respuesta = self.api_client.registrar_cuenta(user_data)
-            url_checkout = respuesta.get("url_checkout")
-            if url_checkout:
-                webbrowser.open(url_checkout)
-                self.main_window.loading_view.set_message("Esperando activación...", "Completa el pago y la verificación en tu navegador.")
-                self.polling_timer.start(5000)
-            else:
-                self.show_error("El servidor no devolvió una URL de pago.")
-        except Exception as e:
-            self.show_error(str(e))
+        """Inicia el proceso de registro en un hilo secundario."""
+        self.main_window.mostrar_vista_carga()
+        self.main_window.auth_view.clear_inputs()
+        self.thread = QThread()
+        self.worker = RegisterWorker(self, user_data)
+        self.worker.moveToThread(self.thread)
+        self.thread.started.connect(self.worker.run)
+        self.worker.progress.connect(self.main_window.loading_view.update_status) # <-- Conexión a la nueva señal
+        self.worker.finished.connect(self.handle_register_result)
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+        self.thread.start()
+
+    def handle_register_result(self, result: dict):
+        """Maneja el resultado del proceso de registro."""
+        if "error" in result:
+            self.show_error(result["error"])
+            self.main_window.mostrar_vista_auth()
+            return
+
+        url_checkout = result.get("url_checkout")
+        if url_checkout:
+            webbrowser.open(url_checkout)
+            self.main_window.loading_view.set_message("Esperando activación...", "Completa el pago y la verificación en tu navegador.")
+            self.polling_timer.start(5000) # 5 segundos
+        else:
+            self.show_error("El servidor no devolvió una URL de pago.")
             self.main_window.mostrar_vista_auth()
 
     def _poll_for_activation(self):

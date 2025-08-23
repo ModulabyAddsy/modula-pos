@@ -242,6 +242,7 @@ QCheckBox {
     color: #0078d4;
     font-size: 12px;
     text-decoration: underline;
+    cursor: pointing_hand; /* <-- Asegúrate que esta línea esté presente */
 }
 #SecondaryLink:hover {
     color: #005a9e;
@@ -251,6 +252,7 @@ QCheckBox {
     border: none;
     color: #dc2626; /* Rojo para acciones como 'olvidé contraseña' */
     font-size: 12px;
+    cursor: pointing_hand; /* <-- Asegúrate que esta línea esté presente */
 }
 #SecondaryLinkRed:hover {
     color: #b91c1c;
