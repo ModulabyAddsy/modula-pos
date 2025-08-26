@@ -1,6 +1,6 @@
 # src/ui/views/auth_view.py
 from PySide6.QtCore import Signal, Qt, QDate
-from PySide6.QtGui import QPixmap, QColor
+from PySide6.QtGui import QPixmap, QColor, QCursor
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
                                QPushButton, QFrame, QStackedWidget, QDateEdit, 
                                QCheckBox, QGraphicsDropShadowEffect)
@@ -63,16 +63,20 @@ class LoginForm(QWidget):
         options_layout = QVBoxLayout()
         options_layout.setSpacing(5)
         self.show_password_checkbox = QCheckBox("Ver contraseña")
+        self.show_password_checkbox.setCursor(QCursor(Qt.PointingHandCursor)) 
         self.forgot_password_button = QPushButton("¿Olvidaste tu contraseña?")
         self.forgot_password_button.setObjectName("SecondaryLinkRed")
+        self.forgot_password_button.setCursor(QCursor(Qt.PointingHandCursor))
         options_layout.addWidget(self.show_password_checkbox, alignment=Qt.AlignLeft)
         options_layout.addWidget(self.forgot_password_button, alignment=Qt.AlignLeft)
         
         self.login_button = QPushButton("Iniciar sesion")
         self.login_button.setObjectName("LoginButton")
+        self.login_button.setCursor(QCursor(Qt.PointingHandCursor))
         
         self.create_account_button = QPushButton("Crear cuenta")
         self.create_account_button.setObjectName("SecondaryLink")
+        self.create_account_button.setCursor(QCursor(Qt.PointingHandCursor))
 
         layout.addWidget(QLabel("Correo electrónico"))
         layout.addWidget(self.email_input)
@@ -148,9 +152,11 @@ class RegisterForm(QWidget):
         
         self.submit_button = QPushButton("Registrar y Proceder al Pago")
         self.submit_button.setObjectName("LoginButton")
+        self.submit_button.setCursor(QCursor(Qt.PointingHandCursor))
 
         back_to_login_button = QPushButton("¿Ya tienes cuenta? Inicia sesión")
         back_to_login_button.setObjectName("SecondaryLink")
+        back_to_login_button.setCursor(QCursor(Qt.PointingHandCursor))
 
         layout.addSpacing(15) # Espacio antes del botón principal
         layout.addWidget(self.submit_button)

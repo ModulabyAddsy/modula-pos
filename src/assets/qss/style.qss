@@ -242,7 +242,6 @@ QCheckBox {
     color: #0078d4;
     font-size: 12px;
     text-decoration: underline;
-    cursor: pointing_hand; /* <-- Asegúrate que esta línea esté presente */
 }
 #SecondaryLink:hover {
     color: #005a9e;
@@ -252,10 +251,25 @@ QCheckBox {
     border: none;
     color: #dc2626; /* Rojo para acciones como 'olvidé contraseña' */
     font-size: 12px;
-    cursor: pointing_hand; /* <-- Asegúrate que esta línea esté presente */
+    text-decoration: underline;
 }
 #SecondaryLinkRed:hover {
     color: #b91c1c;
+}
+
+/* Botón principal */
+#LoginButton {
+    background-color: #0078d4;
+    color: white;
+    font-weight: bold;
+    font-size: 14px;
+    border: none;
+    border-radius: 6px;
+    padding: 12px;
+    min-height: 24px;
+}
+#LoginButton:hover {
+    background-color: #005a9e;
 }
 
 #VersionLabel {

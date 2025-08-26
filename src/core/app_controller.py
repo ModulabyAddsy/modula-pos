@@ -448,8 +448,8 @@ class AppController(QObject):
         url_checkout = result.get("url_checkout")
         if url_checkout:
             webbrowser.open(url_checkout)
-            self.main_window.loading_view.set_message("Esperando activación...", "Completa el pago y la verificación en tu navegador.")
-            self.polling_timer.start(5000) # 5 segundos
+            self.main_window.loading_view.set_message("Esperando activación...", "Completa el pago y la verificación en tu navegador.", indeterminate=True)
+            self.polling_timer.start(30000) # 5 segundos
         else:
             self.show_error("El servidor no devolvió una URL de pago.")
             self.main_window.mostrar_vista_auth()
