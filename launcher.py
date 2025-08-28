@@ -5,51 +5,80 @@ import requests
 import hashlib
 import shutil
 import zipfile
-from PySide6.QtWidgets import QApplication, QWidget, QLabel, QProgressBar, QVBoxLayout
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import QApplication, QWidget, QLabel, QProgressBar, QVBoxLayout, QHBoxLayout
+from PySide6.QtGui import QPixmap
+from PySide6.QtCore import Qt, QTimer # <-- ¡NUEVA IMPORTACIÓN DE RECURSOS!
 
-# --- Configuración ---
-# El nombre de la subcarpeta donde vivirá la aplicación principal
+# --- Configuración (sin cambios) ---
 APP_DIR = 'app'
-# El nombre del ejecutable principal
 APP_EXE = 'Modula.exe'
-# El nombre del archivo de versión
 VERSION_FILE = 'version.txt'
-# ¡IMPORTANTE! Esta será la URL de tu API en Render
 API_URL = "https://modula-backend.onrender.com/api/v1/update/check"
 
-
 class LauncherWindow(QWidget):
-    """La ventana de la interfaz gráfica del lanzador."""
+    """La ventana de la interfaz gráfica del lanzador, ahora con el estilo de Modula."""
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Modula POS Launcher")
-        self.setFixedSize(400, 150)
-        self.setWindowFlags(Qt.FramelessWindowHint)  # Ventana sin bordes
+        self.setFixedSize(450, 250) # Hacemos la ventana un poco más grande
+        self.setWindowFlags(Qt.FramelessWindowHint)
+        
+        # --- NUEVO: Aplicamos un estilo general ---
+        self.setStyleSheet("""
+            QWidget {
+                background-color: #ffffff;
+                font-family: 'Inter', sans-serif;
+            }
+            QProgressBar {
+                border: none;
+                background-color: #e0e0e0;
+                border-radius: 5px;
+                height: 10px;
+            }
+            QProgressBar::chunk {
+                background-color: #0078d4; /* Azul Modula */
+                border-radius: 5px;
+            }
+        """)
 
-        # Layout principal
-        layout = QVBoxLayout(self)
-        layout.setAlignment(Qt.AlignCenter)
+        # --- NUEVO: Logo de Modula ---
+        logo_label = QLabel()
+        pixmap_modula = QPixmap(":/launcher_assets/logo_modula.png")
+        logo_label.setPixmap(pixmap_modula.scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        logo_label.setAlignment(Qt.AlignCenter)
 
-        # Etiqueta de estado
+        # --- NUEVO: Título ---
+        title_label = QLabel("MODULA POS")
+        title_label.setAlignment(Qt.AlignCenter)
+        title_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #1F2937;")
+
+        # Etiqueta de estado (sin cambios en la lógica)
         self.status_label = QLabel("Iniciando lanzador...", self)
         self.status_label.setAlignment(Qt.AlignCenter)
-        font = self.status_label.font()
-        font.setPointSize(12)
-        self.status_label.setFont(font)
+        self.status_label.setStyleSheet("font-size: 14px; color: #4B5563;")
 
-        # Barra de progreso
+        # Barra de progreso (sin cambios en la lógica)
         self.progress_bar = QProgressBar(self)
-        self.progress_bar.setRange(0, 0)  # Modo indeterminado (gusanito)
+        self.progress_bar.setRange(0, 0)
         self.progress_bar.setTextVisible(False)
 
-        layout.addWidget(self.status_label)
-        layout.addWidget(self.progress_bar)
+        # --- NUEVO: Footer "Powered by Addsy" ---
+
+        # --- Layout Principal Reestructurado ---
+        main_layout = QVBoxLayout(self)
+        main_layout.addStretch(1)
+        main_layout.addWidget(logo_label)
+        main_layout.addWidget(title_label)
+        main_layout.addSpacing(20)
+        main_layout.addWidget(self.status_label)
+        main_layout.addWidget(self.progress_bar)
+        main_layout.addStretch(2)
+        main_layout.setContentsMargins(40, 20, 40, 20)
 
     def set_status(self, text):
         """Actualiza el texto de la etiqueta de estado."""
         self.status_label.setText(text)
-        print(text)  # También lo mostramos en consola para depuración
+        print(text)
 
 
 def get_current_version():

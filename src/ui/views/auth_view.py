@@ -3,9 +3,10 @@ from PySide6.QtCore import Signal, Qt, QDate
 from PySide6.QtGui import QPixmap, QColor, QCursor
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
                                QPushButton, QFrame, QStackedWidget, QDateEdit, 
-                               QCheckBox, QGraphicsDropShadowEffect)
+                               QCheckBox, QGraphicsDropShadowEffect, QFormLayout)
 from pathlib import Path
 from src.core.utils import resource_path
+import re
 
 # Se calcula la ruta raíz para poder encontrar los assets de forma fiable
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -105,17 +106,17 @@ class LoginForm(QWidget):
             self.password_input.setEchoMode(QLineEdit.Password)
 
 class RegisterForm(QWidget):
-    """Formulario específico para el registro de nuevos usuarios (sin cambios en la lógica)."""
+    """Formulario de registro con validación y un layout profesional."""
     registro_solicitado = Signal(dict)
     ir_a_login = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.setSpacing(8) # Espaciado reducido para más cohesión
-        layout.setContentsMargins(0, 0, 0, 0)
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(1) # Reducimos el espaciado general
+        main_layout.setContentsMargins(0, 0, 0, 0)
         
-        # ... (definición de widgets sin cambios) ...
+        # --- Creación de Widgets de Entrada (sin cambios) ---
         self.nombre_completo = QLineEdit()
         self.correo = QLineEdit()
         self.contrasena = QLineEdit()
@@ -128,55 +129,123 @@ class RegisterForm(QWidget):
         self.nombre_empresa = QLineEdit()
         self.rfc = QLineEdit()
 
-        # --- CORREGIDO: Mejoramos el layout del formulario ---
-        layout.addWidget(QLabel("Nombre Completo:"))
-        layout.addWidget(self.nombre_completo)
-        layout.addSpacing(5)
-        layout.addWidget(QLabel("Correo Electrónico:"))
-        layout.addWidget(self.correo)
-        layout.addSpacing(5)
-        layout.addWidget(QLabel("Contraseña:"))
-        layout.addWidget(self.contrasena)
-        layout.addSpacing(5)
-        layout.addWidget(QLabel("Teléfono:"))
-        layout.addWidget(self.telefono)
-        layout.addSpacing(5)
-        layout.addWidget(QLabel("Fecha de Nacimiento:"))
-        layout.addWidget(self.fecha_nacimiento)
-        layout.addSpacing(5)
-        layout.addWidget(QLabel("Nombre de la Empresa:"))
-        layout.addWidget(self.nombre_empresa)
-        layout.addSpacing(5)
-        layout.addWidget(QLabel("RFC (Opcional):"))
-        layout.addWidget(self.rfc)
+        # --- Creación de Etiquetas de Error (sin cambios) ---
+        self.error_nombre_completo = QLabel()
+        self.error_correo = QLabel()
+        self.error_contrasena = QLabel()
+        self.error_telefono = QLabel()
+        self.error_nombre_empresa = QLabel()
         
+        for label in [self.error_nombre_completo, self.error_correo, self.error_contrasena, self.error_telefono, self.error_nombre_empresa]:
+            label.setObjectName("ValidationErrorLabel")
+            label.setVisible(False)
+            label.setAlignment(Qt.AlignLeft)
+
+        # --- AÑADIMOS WIDGETS AL LAYOUT CON LA ESTRUCTURA VERTICAL ---
+        main_layout.addWidget(QLabel("Nombre Completo:"))
+        main_layout.addWidget(self.nombre_completo)
+        main_layout.addWidget(self.error_nombre_completo)
+        
+        main_layout.addWidget(QLabel("Correo Electrónico:"))
+        main_layout.addWidget(self.correo)
+        main_layout.addWidget(self.error_correo)
+
+        main_layout.addWidget(QLabel("Contraseña (mínimo 6 caracteres):"))
+        main_layout.addWidget(self.contrasena)
+        main_layout.addWidget(self.error_contrasena)
+
+        main_layout.addWidget(QLabel("Teléfono:"))
+        main_layout.addWidget(self.telefono)
+        main_layout.addWidget(self.error_telefono)
+        
+        main_layout.addWidget(QLabel("Fecha de Nacimiento:"))
+        main_layout.addWidget(self.fecha_nacimiento)
+        
+        main_layout.addWidget(QLabel("Nombre de la Empresa:"))
+        main_layout.addWidget(self.nombre_empresa)
+        main_layout.addWidget(self.error_nombre_empresa)
+        
+        main_layout.addWidget(QLabel("RFC (Opcional):"))
+        main_layout.addWidget(self.rfc)
+        
+        # --- LÓGICA DE BOTONES CORREGIDA ---
         self.submit_button = QPushButton("Registrar y Proceder al Pago")
         self.submit_button.setObjectName("LoginButton")
         self.submit_button.setCursor(QCursor(Qt.PointingHandCursor))
+        self.submit_button.setEnabled(False)
 
         back_to_login_button = QPushButton("¿Ya tienes cuenta? Inicia sesión")
         back_to_login_button.setObjectName("SecondaryLink")
         back_to_login_button.setCursor(QCursor(Qt.PointingHandCursor))
 
-        layout.addSpacing(15) # Espacio antes del botón principal
-        layout.addWidget(self.submit_button)
-        layout.addSpacing(30) # --- CORREGIDO: Espacio entre los dos botones ---
-        layout.addWidget(back_to_login_button, alignment=Qt.AlignCenter)
+        main_layout.addStretch(1) # Empuja el formulario hacia arriba y los botones hacia abajo
+
+        # Creamos un layout dedicado solo para los botones
+        button_layout = QVBoxLayout()
+        button_layout.setSpacing(10)
+        button_layout.addWidget(self.submit_button)
+        button_layout.addWidget(back_to_login_button, alignment=Qt.AlignCenter)
         
+        # Añadimos el layout de botones al layout principal
+        main_layout.addLayout(button_layout)
+        
+        # --- Conexión de Señales (sin cambios) ---
         self.submit_button.clicked.connect(self.submit)
         back_to_login_button.clicked.connect(self.ir_a_login.emit)
+        
+        self.nombre_completo.textChanged.connect(self._validate_form)
+        self.correo.textChanged.connect(self._validate_form)
+        self.contrasena.textChanged.connect(self._validate_form)
+        self.telefono.textChanged.connect(self._validate_form)
+        self.nombre_empresa.textChanged.connect(self._validate_form)
+
+    # --- NUEVAS FUNCIONES DE VALIDACIÓN ---
+
+    def _validate_field(self, line_edit, error_label, min_length=1, message="Este campo es obligatorio", validator=None, validator_message="Formato no válido"):
+        """Función genérica para validar un campo."""
+        text = line_edit.text().strip()
+        if len(text) < min_length:
+            error_label.setText(message)
+            error_label.setVisible(True)
+            return False
+        if validator and not validator(text):
+            error_label.setText(validator_message)
+            error_label.setVisible(True)
+            return False
+        
+        error_label.setVisible(False)
+        return True
+
+    def _validate_correo(self, text):
+        """Valida que el texto tenga un formato de correo simple."""
+        return re.match(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$", text)
+
+    def _validate_form(self):
+        """Orquesta la validación de todo el formulario y activa/desactiva el botón."""
+        is_nombre_valid = self._validate_field(self.nombre_completo, self.error_nombre_completo, 3, "Debe tener al menos 3 caracteres")
+        is_correo_valid = self._validate_field(self.correo, self.error_correo, validator=self._validate_correo, validator_message="Correo no válido")
+        is_contrasena_valid = self._validate_field(self.contrasena, self.error_contrasena, 6, "Debe tener al menos 6 caracteres")
+        is_telefono_valid = self._validate_field(self.telefono, self.error_telefono, 10, "Debe tener 10 dígitos")
+        is_empresa_valid = self._validate_field(self.nombre_empresa, self.error_nombre_empresa)
+
+        # <-- Habilitamos el botón solo si todos los campos requeridos son válidos
+        is_form_valid = all([is_nombre_valid, is_correo_valid, is_contrasena_valid, is_telefono_valid, is_empresa_valid])
+        self.submit_button.setEnabled(is_form_valid)
+
 
     def submit(self):
+        # La lógica de submit no cambia
         data = {
-            "nombre_completo": self.nombre_completo.text(),
-            "correo": self.correo.text(),
+            "nombre_completo": self.nombre_completo.text().strip(),
+            "correo": self.correo.text().strip(),
             "contrasena": self.contrasena.text(),
-            "telefono": self.telefono.text(),
+            "telefono": self.telefono.text().strip(),
             "fecha_nacimiento": self.fecha_nacimiento.date().toString("yyyy-MM-dd"),
-            "nombre_empresa": self.nombre_empresa.text(),
-            "rfc": self.rfc.text(),
+            "nombre_empresa": self.nombre_empresa.text().strip(),
+            "rfc": self.rfc.text().strip(),
         }
         self.registro_solicitado.emit(data)
+
 
 class AuthView(QWidget):
     """Vista principal de autenticación que implementa el nuevo diseño de dos paneles."""
@@ -241,16 +310,6 @@ class AuthView(QWidget):
         
         self.title_label = QLabel("Bienvenido a Modula")
         self.title_label.setObjectName("AuthTitle")
-        
-        powered_by_layout = QHBoxLayout()
-        powered_by_text = QLabel("Complete los datos requeridos.")
-        powered_by_text.setObjectName("PoweredByText")
-        powered_by_logo = QLabel()
-        powered_by_logo.setPixmap(QPixmap(logo_addsy_path).scaledToHeight(16, Qt.SmoothTransformation))
-        powered_by_layout.addStretch()
-        powered_by_layout.addWidget(powered_by_text)
-        powered_by_layout.addWidget(powered_by_logo)
-        powered_by_layout.addStretch()
 
         self.error_label = QLabel("")
         self.error_label.setObjectName("AuthErrorLabel")
@@ -267,7 +326,6 @@ class AuthView(QWidget):
         version_label.setObjectName("VersionLabel")
 
         card_layout.addWidget(self.title_label, alignment=Qt.AlignCenter)
-        card_layout.addLayout(powered_by_layout)
         card_layout.addWidget(self.error_label, alignment=Qt.AlignCenter)
         card_layout.addWidget(self.stacked_widget)
         

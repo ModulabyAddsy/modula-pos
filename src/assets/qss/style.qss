@@ -19,6 +19,7 @@ QLineEdit {
     border-radius: 8px;
     padding: 8px 10px; /* 8px vertical, 10px horizontal */
     color: #374151;
+    min-height: 20px;
 }
 
 QLineEdit:focus {
@@ -394,4 +395,25 @@ QCheckBox {
 #NewTerminalDialog #cancelButton:hover {
     background-color: #F9FAFB;
     border-color: #9CA3AF;
+}
+
+/* Etiqueta para mensajes de error de validación */
+#ValidationErrorLabel {
+    color: #dc2626; /* Rojo */
+    font-size: 11px;
+    min-height: 15px;
+}
+
+/* Estilo para el campo de fecha */
+QDateEdit {
+    background-color: #F9FAFB;
+    border: 1px solid #D1D5DB;
+    border-radius: 8px;
+    padding: 8px 10px; /* Consistente con QLineEdit */
+    color: #374151;
+    min-height: 20px; /* Asegura una altura mínima */
+}
+
+QDateEdit:focus {
+    border: 2px solid #3B82F6; /* blue-500 */
 }
