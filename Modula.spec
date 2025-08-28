@@ -10,7 +10,7 @@ a = Analysis(
         ('src/core', 'core'),
         ('src/ui', 'ui')
     ],
-    hiddenimports=[],
+    hiddenimports=['httpcore', 'h11', 'anyio', 'brotli'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
