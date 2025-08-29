@@ -20,14 +20,20 @@ class LauncherWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Modula POS Launcher")
-        self.setFixedSize(450, 250) # Hacemos la ventana un poco más grande
-        self.setWindowFlags(Qt.FramelessWindowHint)
+        self.setFixedSize(450, 250)
         
-        # --- NUEVO: Aplicamos un estilo general ---
-        self.setStyleSheet("""
-            QWidget {
+        # --- PASO 1: HACEMOS LA VENTANA PRINCIPAL TRANSPARENTE ---
+        self.setWindowFlags(Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+
+        # --- PASO 2: CREAMOS UN CONTENEDOR PRINCIPAL QUE SÍ TENDRÁ ESTILO ---
+        main_container = QWidget(self)
+        main_container.setObjectName("MainContainer")
+        main_container.setStyleSheet("""
+            #MainContainer {
                 background-color: #ffffff;
-                font-family: 'Inter', sans-serif;
+                border: 1px solid #374151;
+                border-radius: 8px; /* Añadimos bordes redondeados */
             }
             QProgressBar {
                 border: none;
@@ -36,44 +42,66 @@ class LauncherWindow(QWidget):
                 height: 10px;
             }
             QProgressBar::chunk {
-                background-color: #0078d4; /* Azul Modula */
+                background-color: #0078d4;
                 border-radius: 5px;
             }
         """)
 
-        # --- NUEVO: Logo de Modula ---
+        # --- PASO 3: TODO LO DEMÁS VA DENTRO DEL CONTENEDOR ---
+        
+        # Logo de Modula
         logo_label = QLabel()
         pixmap_modula = QPixmap(":/launcher_assets/logo_modula.png")
         logo_label.setPixmap(pixmap_modula.scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         logo_label.setAlignment(Qt.AlignCenter)
 
-        # --- NUEVO: Título ---
+        # Título
         title_label = QLabel("MODULA POS")
         title_label.setAlignment(Qt.AlignCenter)
         title_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #1F2937;")
 
-        # Etiqueta de estado (sin cambios en la lógica)
+        # Etiqueta de estado
         self.status_label = QLabel("Iniciando lanzador...", self)
         self.status_label.setAlignment(Qt.AlignCenter)
         self.status_label.setStyleSheet("font-size: 14px; color: #4B5563;")
 
-        # Barra de progreso (sin cambios en la lógica)
+        # Barra de progreso
         self.progress_bar = QProgressBar(self)
         self.progress_bar.setRange(0, 0)
         self.progress_bar.setTextVisible(False)
 
-        # --- NUEVO: Footer "Powered by Addsy" ---
+        # Footer "Powered by Addsy"
+        footer_container = QWidget()
+        footer_layout = QHBoxLayout(footer_container)
+        footer_layout.setContentsMargins(0,0,0,0)
+        footer_layout.setSpacing(6)
+        footer_text = QLabel("Powered by:")
+        footer_text.setStyleSheet("font-size: 12px; color: #6B7280;")
+        footer_logo = QLabel()
+        pixmap_addsy = QPixmap(":/launcher_assets/logo_addsy_powered.png")
+        footer_logo.setPixmap(pixmap_addsy.scaledToHeight(16, Qt.SmoothTransformation))
+        footer_layout.addStretch()
+        footer_layout.addWidget(footer_text)
+        footer_layout.addWidget(footer_logo)
+        footer_layout.addStretch()
 
-        # --- Layout Principal Reestructurado ---
+        # Usamos un layout para el contenedor
+        container_layout = QVBoxLayout(main_container)
+        container_layout.addStretch(1)
+        container_layout.addWidget(logo_label)
+        container_layout.addWidget(title_label)
+        container_layout.addSpacing(20)
+        container_layout.addWidget(self.status_label)
+        container_layout.addWidget(self.progress_bar)
+        container_layout.addStretch(2)
+        container_layout.addWidget(footer_container)
+        container_layout.setContentsMargins(40, 20, 40, 20)
+
+        # Finalmente, un layout simple para la ventana principal transparente
+        # que solo contiene a nuestro contenedor
         main_layout = QVBoxLayout(self)
-        main_layout.addStretch(1)
-        main_layout.addWidget(logo_label)
-        main_layout.addWidget(title_label)
-        main_layout.addSpacing(20)
-        main_layout.addWidget(self.status_label)
-        main_layout.addWidget(self.progress_bar)
-        main_layout.addStretch(2)
-        main_layout.setContentsMargins(40, 20, 40, 20)
+        main_layout.addWidget(main_container)
+        main_layout.setContentsMargins(0, 0, 0, 0)
 
     def set_status(self, text):
         """Actualiza el texto de la etiqueta de estado."""
@@ -175,7 +203,7 @@ def check_for_updates(window):
         response.raise_for_status()
 
         if response.status_code == 204:
-            window.set_status("¡Estás al día!")
+            window.set_status(f"Abriendo Modula v{current_version}")
             QTimer.singleShot(1500, run_modula)
             return
 
@@ -217,7 +245,9 @@ def check_for_updates(window):
             return
 
         os.remove(zip_save_path)
-        window.set_status("¡Actualización completada!")
+        # --- LÍNEA CORREGIDA ---
+        # Usamos la variable 'new_version' que obtuvimos de la API
+        window.set_status(f"Abriendo Modula v{new_version}")
         QTimer.singleShot(1500, run_modula)
 
     except requests.exceptions.RequestException as e:
@@ -230,6 +260,9 @@ if __name__ == '__main__':
     app = QApplication(sys.argv)
     window = LauncherWindow()
     window.show()
+    
+    window.activateWindow()
+    window.raise_()
 
     # Inicia el proceso de actualización 500ms después de que la ventana se muestre
     QTimer.singleShot(500, lambda: check_for_updates(window))
