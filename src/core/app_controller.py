@@ -1,5 +1,14 @@
 # src/core/app_controller.py
 import webbrowser
+TABLE_PRIMARY_KEYS = {
+    'egresos': 'uuid',
+    'ingresos': 'uuid',
+    'ventas': 'uuid',
+    'clientes': 'id',
+    'productos': 'id',
+    'empleados': 'id',
+    # ... Añade aquí el resto de tus tablas y sus claves primarias
+}
 import os
 import uuid
 import psutil
@@ -8,9 +17,10 @@ from PySide6.QtWidgets import QMessageBox, QInputDialog, QApplication
 from PySide6.QtCore import QTimer, QObject, Signal, QThread
 from src.ui.main_window import MainWindow
 from src.core.api_client import ApiClient
-from src.core.local_storage import get_id_terminal, save_terminal_id, DB_DIR, get_local_db_file_info
+from src.core.local_storage import get_id_terminal, save_terminal_id, DB_DIR, get_local_db_file_info, get_pending_sync_records, mark_records_as_synced, ejecutar_migracion_sql, limpiar_datos_sucursal_anterior
 from src.ui.dialogs import mostrar_dialogo_migracion, ResolverUbicacionDialog, SeleccionarSucursalDialog, RecuperarContrasenaDialog, NewTerminalDialog
 import time
+
 
 class StartupWorker(QObject):
     """
@@ -25,40 +35,34 @@ class StartupWorker(QObject):
         super().__init__()
         self.controller = controller_ref
         self.api_client = controller_ref.api_client
-
+        self.response = None
+        
     def run(self):
         """El trabajo pesado que se ejecuta en el hilo secundario."""
         try:
-            # === PASO 1 y 2: VERIFICACIÓN Y PLANIFICACIÓN (como ya lo tienes) ===
+            # === PASO 1: VERIFICACIÓN Y AUTENTICACIÓN ===
             self.progress.emit("Verificando terminal...", 10)
             hardware_id = self.controller._generar_id_estable()
             local_id = get_id_terminal()
-            respuesta_verificacion = None
-
+            
+            self.progress.emit("Verificando credenciales con el servidor...", 20)
             if local_id and local_id == hardware_id:
-                respuesta_verificacion = self.api_client.verificar_terminal(hardware_id)
-                print(f"DEBUG: Respuesta de verificación recibida: {respuesta_verificacion}")
+                self.response = self.api_client.verificar_terminal(hardware_id)
             else:
-                try:
-                    self.api_client.buscar_terminal_por_hardware(hardware_id)
+                self.response = self.api_client.verificar_terminal(hardware_id)
+                if self.response.get("status") == "ok":
                     save_terminal_id(hardware_id)
-                    respuesta_verificacion = self.api_client.verificar_terminal(hardware_id)
-                except Exception:
-                    self.finished.emit("activacion_requerida", [])
-                    return
-            if respuesta_verificacion.get("status") != "ok":
-                self.finished.emit(respuesta_verificacion, [])
+            
+            if self.response.get("status") != "ok":
+                self.finished.emit(self.response, [])
                 return
-            self.api_client.set_auth_token(respuesta_verificacion["access_token"])
             
-            # === PASO 3: SINCRONIZACIÓN INTELIGENTE ===
-            self.progress.emit("Iniciando sincronización inteligente...", 70)
-            id_sucursal = respuesta_verificacion['id_sucursal']
-            id_empresa = respuesta_verificacion['id_empresa']
+            self.api_client.set_auth_token(self.response["access_token"])
+            id_sucursal = self.response['id_sucursal']
+            id_empresa = self.response['id_empresa']
             
-            # --- ETAPA 3: PUSH DE DATOS LOCALES PRIMERO ---
-            self.progress.emit("Enviando cambios locales...", 30)
-            from src.core.local_storage import get_pending_sync_records
+            # === PASO 2: SINCRONIZACIÓN INTELIGENTE: PUSH de datos locales ===
+            self.progress.emit("Enviando cambios locales a la nube...", 30)
             pending_pushes = get_pending_sync_records(id_empresa)
             
             if not pending_pushes:
@@ -66,38 +70,56 @@ class StartupWorker(QObject):
             else:
                 for i, push_data in enumerate(pending_pushes):
                     progreso = 30 + int((i / len(pending_pushes)) * 20)
-                    self.progress.emit(f"Sincronizando {push_data['table_name']}...", progreso)
+                    table_name = push_data['table_name']
+                    self.progress.emit(f"Sincronizando {table_name}...", progreso)
+                    
+                    pk_column = TABLE_PRIMARY_KEYS.get(table_name, 'id')
+                    push_data['primary_key_column'] = pk_column
+                    
+                    # --- AJUSTE FINAL Y CRÍTICO ---
+                    # Para cada registro que vamos a enviar, eliminamos su 'id' local.
+                    # Esto fuerza a la base de datos de la nube a asignar su propio 'id' secuencial,
+                    # evitando así las colisiones. La sincronización se basa puramente en el 'uuid'.
+                    for record in push_data['records']:
+                        if 'id' in record:
+                            del record['id']
+                    # --- FIN DEL AJUSTE ---
+
                     self.api_client.push_records(push_data)
 
-            # --- ETAPAS 1 y 2: INICIALIZAR EN LA NUBE ---
-            self.progress.emit("Preparando la nube...", 50)
+            # === PASO 3: SINCRONIZACIÓN INTELIGENTE: PULL de datos de la nube ===
+            self.progress.emit("Preparando la nube para la sincronización...", 50)
             cloud_plan = self.api_client.initialize_sync()
             
-            # --- ETAPA 4: PULL DE LA VERSIÓN FINAL ---
+            if cloud_plan.get('migracion_requerida', False) and 'id_sucursal_anterior' in cloud_plan:
+                 limpiar_datos_sucursal_anterior(id_empresa, cloud_plan['id_sucursal_anterior'])
+
+            for migration in cloud_plan.get('migrations', []):
+                db_path = DB_DIR / id_empresa / migration['db_relative_path']
+                ejecutar_migracion_sql(db_path, migration['commands'])
+
             self.progress.emit("Descargando datos actualizados...", 70)
             files_to_pull = cloud_plan.get("files_to_pull", [])
             ruta_base_local = DB_DIR
             
-            for i, key_path in enumerate(files_to_pull):
-                progreso = 70 + int((i / len(files_to_pull)) * 25)
-                nombre_archivo = Path(key_path).name
-                self.progress.emit(f"Descargando {nombre_archivo}...", progreso)
-                
-                ruta_destino_local = ruta_base_local / key_path
-                self.api_client.pull_db_file(key_path, ruta_destino_local)
+            # Verificamos si files_to_pull no está vacío para evitar división por cero
+            if files_to_pull:
+                for i, key_path in enumerate(files_to_pull):
+                    progreso = 70 + int((i / len(files_to_pull)) * 25)
+                    nombre_archivo = Path(key_path).name
+                    self.progress.emit(f"Descargando {nombre_archivo}...", progreso)
+                    ruta_destino_local = ruta_base_local / key_path
+                    self.api_client.pull_db_file(key_path, ruta_destino_local)
 
-            # --- LIMPIEZA FINAL ---
-            from src.core.local_storage import mark_records_as_synced
+            # === PASO 4: FINALIZACIÓN ===
             mark_records_as_synced(id_empresa)
-            
             self.progress.emit("¡Sincronización completa!", 100)
-            self.finished.emit(respuesta_verificacion, ["Sincronización v2.0 completada exitosamente."])
-
+            self.finished.emit(self.response, ["Sincronización completada. Iniciando aplicación..."])
 
         except Exception as e:
             import traceback
             traceback.print_exc()
-            self.finished.emit(f"Error crítico en el arranque: {e}", [])
+            self.finished.emit({"status": "error", "message": f"Error crítico en el arranque: {e}"}, [])
 
 class RegisterWorker(QObject):
     """Ejecuta el proceso de registro en un hilo secundario."""
@@ -225,21 +247,19 @@ class AppController(QObject):
                 print("El backend no reconoce este hardware. Es una terminal nueva.")
                 return "activacion_requerida"
 
-    def handle_startup_result(self, result):
+    def handle_startup_result(self, result, logs):
         """
         Manejador central para el resultado del worker de arranque.
         Ahora es más directo y no muestra un diálogo de resumen.
         """
-        if isinstance(result, str): # Si el resultado es un string, es un error o acción
-            if result == "activacion_requerida":
+        if isinstance(result, str) or result.get("status") == "error":
+            if result == "activacion_requerida" or result.get("message") == "Terminal no encontrada en el backend.":
                 self.solicitar_login_activacion()
             else:
-                self.show_error(f"Error en el arranque: {result}")
+                self.show_error(result.get("message", "Error desconocido en el arranque."))
                 self.main_window.mostrar_vista_auth()
         
-        elif isinstance(result, dict): # Si es un diccionario, es una respuesta de API
-            # ✅ CORRECCIÓN: Llamamos directamente a la función que decide a dónde ir,
-            # sin mostrar el QMessageBox que causaba el bloqueo.
+        elif isinstance(result, dict):
             self._manejar_respuesta_verificacion(result)
             
     def solicitar_login_activacion(self):

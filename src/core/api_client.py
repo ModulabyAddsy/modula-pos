@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 import hashlib
 from src.core.local_storage import calcular_hash_md5
+from datetime import datetime
+import uuid
 
 class ApiClient:
     """Gestiona toda la comunicación con el backend de Modula."""
@@ -12,6 +14,20 @@ class ApiClient:
         if not self.base_url:
             raise ValueError("La URL del API no está configurada. Revisa tu archivo .env")
         self.auth_token = None
+        
+    def _sanitize_data_for_json(self, data):
+        """
+        Sanea recursivamente los datos para asegurar que sean serializables a JSON.
+        Convierte UUIDs, datetimes y otros tipos no estándar a cadenas.
+        """
+        if isinstance(data, dict):
+            return {k: self._sanitize_data_for_json(v) for k, v in data.items()}
+        elif isinstance(data, list):
+            return [self._sanitize_data_for_json(item) for item in data]
+        elif isinstance(data, (datetime, uuid.UUID)):
+            return str(data)
+        else:
+            return data
 
     def set_auth_token(self, token: str):
         """Almacena el token de autenticación para futuras peticiones."""
@@ -264,25 +280,29 @@ class ApiClient:
             return response.json()
         except Exception as e:
             raise Exception(f"Error al verificar estado de sincronización: {e}")
-
+        
     def descargar_archivo(self, key_en_la_nube: str, ruta_local_destino: Path):
         """Descarga un archivo específico desde la nube y lo guarda localmente."""
-        if not self.auth_token: raise Exception("Se requiere autenticación para descargar.")
+        if not self.auth_token: 
+            raise Exception("Se requiere autenticación para descargar.")
+
         url = f"{self.base_url}/api/v1/sync/pull-db/{key_en_la_nube}"
         headers = {"Authorization": f"Bearer {self.auth_token}"}
+        
+        # ✅ CORRECCIÓN: Usar la variable correcta del argumento de la función.
+        ruta_local_destino.parent.mkdir(parents=True, exist_ok=True)
+        
         try:
-            # ✅ LÍNEA CLAVE: Asegura que el directorio padre exista antes de escribir.
-            # Por ejemplo, si la ruta es '.../Databases/MOD_EMP_1001/suc_25/tickets.sqlite',
-            # esto creará la carpeta 'suc_25' si no existe.
-            ruta_local_destino.parent.mkdir(parents=True, exist_ok=True)
-
-            with httpx.stream("GET", url, headers=headers, timeout=60.0) as response:
+            with httpx.stream("GET", url, headers=headers, timeout=120.0) as response:
                 response.raise_for_status()
                 with open(ruta_local_destino, "wb") as f:
                     for chunk in response.iter_bytes():
                         f.write(chunk)
             print(f"✅ Descarga completa: {key_en_la_nube}")
             return True
+        except httpx.HTTPStatusError as e:
+            print(f"❌ Error al descargar {key_en_la_nube}: Error HTTP {e.response.status_code}")
+            return False
         except Exception as e:
             print(f"❌ Error al descargar {key_en_la_nube}: {e}")
             return False
@@ -316,49 +336,58 @@ class ApiClient:
     def initialize_sync(self) -> dict:
         """Llama al backend para preparar la nube (Etapas 1 y 2)."""
         print(f"DEBUG: Token a punto de ser usado en initialize_sync: {self.auth_token}")
-        # 1. ✅ AÑADIR VERIFICACIÓN: Nos aseguramos de que el token exista antes de hacer la llamada.
         if not self.auth_token:
             raise Exception("Intento de llamar a 'initialize_sync' sin un token de autenticación.")
         
         url = f"{self.base_url}/api/v1/sync/initialize"
         
-        # 2. ✅ LÍNEA CRÍTICA: Construir la cabecera de autorización.
-        # Esto le dice al backend "Soy yo, y aquí está mi credencial (el token)".
         headers = {"Authorization": f"Bearer {self.auth_token}"}
         
         try:
             with httpx.Client() as client:
-                # 3. ✅ AÑADIR headers=headers a la petición.
                 response = client.post(url, headers=headers, timeout=120.0)
             
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:
-            # Esto nos dará más detalles en caso de otro error.
             print(f"Error en la petición a {url}: {e.response.text}")
-            raise e
 
     def push_records(self, push_data: dict) -> dict:
         """Envía un paquete de registros locales a la nube para fusionarlos."""
         if not self.auth_token: raise Exception("Autenticación requerida.")
         url = f"{self.base_url}/api/v1/sync/push-records"
         headers = {"Authorization": f"Bearer {self.auth_token}"}
+        
+        # ✅ LÍNEA CRÍTICA: Llama a la función de limpieza antes de enviar.
+        sanitized_data = self._sanitize_data_for_json(push_data)
+        
         with httpx.Client() as client:
-            response = client.post(url, headers=headers, json=push_data, timeout=120.0)
+            response = client.post(url, headers=headers, json=sanitized_data, timeout=120.0)
+        
         response.raise_for_status()
         return response.json()
 
     def pull_db_file(self, key_path: str, local_destination: Path):
         """Descarga un archivo de DB desde el endpoint de pull."""
-        if not self.auth_token: raise Exception("Autenticación requerida.")
+        if not self.auth_token:
+            raise Exception("Autenticación requerida.")
+            
         url = f"{self.base_url}/api/v1/sync/pull-db/{key_path}"
         headers = {"Authorization": f"Bearer {self.auth_token}"}
         
         local_destination.parent.mkdir(parents=True, exist_ok=True)
         
-        with httpx.stream("GET", url, headers=headers, timeout=120.0) as response:
-            response.raise_for_status()
-            with open(local_destination, "wb") as f:
-                for chunk in response.iter_bytes():
-                    f.write(chunk)
-        print(f"✅ Descarga completa: {key_path}")
+        try:
+            with httpx.stream("GET", url, headers=headers, timeout=120.0) as response:
+                response.raise_for_status()
+                with open(local_destination, "wb") as f:
+                    for chunk in response.iter_bytes():
+                        f.write(chunk)
+                print(f"✅ Descarga completa: {key_path}")
+                return True
+        except httpx.HTTPStatusError as e:
+            print(f"❌ Error al descargar {key_path}: Error HTTP {e.response.status_code}")
+            return False
+        except Exception as e:
+            print(f"❌ Error al descargar {key_path}: {e}")
+            return False

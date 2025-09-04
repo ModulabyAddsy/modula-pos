@@ -160,7 +160,8 @@ def ejecutar_migracion_sql(db_path: Path, comandos: list[str]):
             
 def get_pending_sync_records(id_empresa: str) -> list:
     """
-    Escanea todas las DB locales y extrae los registros marcados con needs_sync = 1.
+    Scans all local DBs and extracts records marked with needs_sync = 1,
+    ensuring that the UUID and dates are in the correct string format.
     """
     all_pending_pushes = []
     company_root_path = DB_DIR / id_empresa
@@ -169,25 +170,35 @@ def get_pending_sync_records(id_empresa: str) -> list:
 
     for db_path in company_root_path.rglob('*.sqlite'):
         conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row # Para acceder a los resultados como diccionarios
+        conn.row_factory = sqlite3.Row  # To access results as dictionaries
         cursor = conn.cursor()
-        
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        tablas = [row[0] for row in cursor.fetchall()]
 
-        for tabla in tablas:
-            # Solo actuamos si la tabla tiene las columnas de sincronización
-            cursor.execute(f"PRAGMA table_info('{tabla}')")
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = [row[0] for row in cursor.fetchall()]
+
+        for table in tables:
+            cursor.execute(f"PRAGMA table_info('{table}')")
             column_names = {info[1] for info in cursor.fetchall()}
             if 'needs_sync' in column_names and 'uuid' in column_names:
-                cursor.execute(f"SELECT * FROM {tabla} WHERE needs_sync = 1")
+                cursor.execute(f"SELECT * FROM {table} WHERE needs_sync = 1")
                 records_to_sync = [dict(row) for row in cursor.fetchall()]
-                
+
+                for record in records_to_sync:
+                    # ✅ CRITICAL FIX 1: Convert UUID to string if it exists
+                    if 'uuid' in record and record['uuid'] is not None:
+                        record['uuid'] = str(record['uuid'])
+
+                    # ✅ CRITICAL FIX 2: Convert last_modified to string if it exists
+                    if 'last_modified' in record and record['last_modified'] is not None:
+                        # Convert datetime object to ISO 8601 string, which is standard for APIs
+                        record['last_modified'] = str(record['last_modified'])
+
+
                 if records_to_sync:
                     db_relative_path = db_path.relative_to(DB_DIR).as_posix()
                     all_pending_pushes.append({
                         "db_relative_path": db_relative_path,
-                        "table_name": tabla,
+                        "table_name": table,
                         "records": records_to_sync
                     })
         conn.close()
