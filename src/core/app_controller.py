@@ -2,11 +2,6 @@
 import webbrowser
 TABLE_PRIMARY_KEYS = {
     'egresos': 'uuid',
-    'ingresos': 'uuid',
-    'ventas': 'uuid',
-    'clientes': 'id',
-    'productos': 'id',
-    'empleados': 'id',
     # ... Añade aquí el resto de tus tablas y sus claves primarias
 }
 import os
