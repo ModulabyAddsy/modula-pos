@@ -473,13 +473,14 @@ class AppController(QObject):
         print("Polling para verificar activación...")
         try:
             respuesta = self.api_client.check_activation_status(self.claim_token)
+            print(f"{self.claim_token}")
             if respuesta.get("status") == "complete":
                 print("¡Activación completada!")
                 self.polling_timer.stop()
                 self.api_client.set_auth_token(respuesta["access_token"])
                 save_terminal_id(respuesta["id_terminal"])
                 QMessageBox.information(self.main_window, "¡Cuenta Activada!", "Tu cuenta y tu primera terminal han sido configuradas exitosamente.")
-                self.main_window.mostrar_vista_dashboard()
+                self._iniciar_arranque_inteligente()
         except Exception as e:
             print(f"Error durante el polling: {e}. Se reintentará...")
 
