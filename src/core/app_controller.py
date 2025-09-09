@@ -7,13 +7,17 @@ TABLE_PRIMARY_KEYS = {
 import os
 import uuid
 import psutil
+import sqlite3
 from pathlib import Path
+import bcrypt
 from PySide6.QtWidgets import QMessageBox, QInputDialog, QApplication
 from PySide6.QtCore import QTimer, QObject, Signal, QThread
 from src.ui.main_window import MainWindow
 from src.core.api_client import ApiClient
 from src.core.local_storage import get_id_terminal, save_terminal_id, DB_DIR, get_local_db_file_info, get_pending_sync_records, mark_records_as_synced, ejecutar_migracion_sql, limpiar_datos_sucursal_anterior
 from src.ui.dialogs import mostrar_dialogo_migracion, ResolverUbicacionDialog, SeleccionarSucursalDialog, RecuperarContrasenaDialog, NewTerminalDialog
+from src.ui.views.login_view import LoginView
+from src.ui.views.dashboard_view import DashboardView
 import time
 
 
@@ -55,6 +59,7 @@ class StartupWorker(QObject):
             self.api_client.set_auth_token(self.response["access_token"])
             id_sucursal = self.response['id_sucursal']
             id_empresa = self.response['id_empresa']
+            self.controller.id_empresa_addsy = self.response['id_empresa']
             
             # === PASO 2: SINCRONIZACIÓN INTELIGENTE: PUSH de datos locales ===
             self.progress.emit("Enviando cambios locales a la nube...", 30)
@@ -190,12 +195,19 @@ class AppController(QObject):
         self.claim_token = None
         self.polling_timer = QTimer()
         self.polling_timer.timeout.connect(self._poll_for_activation)
+        
+        self.id_empresa_addsy = None
+        
+        self.login_view = LoginView()
         self._connect_signals()
 
     def _connect_signals(self):
         self.main_window.auth_view.login_solicitado.connect(self.handle_account_login_and_activate)
         self.main_window.auth_view.registro_solicitado.connect(self.handle_register)
         self.main_window.auth_view.recuperacion_solicitada.connect(self.handle_recovery_request)
+        
+        self.login_view.login_solicitado.connect(self._handle_local_login)
+        self.login_view.recuperacion_solicitada.connect(self.handle_recovery_request)
 
     def run(self):
         self.main_window.show()
@@ -255,7 +267,13 @@ class AppController(QObject):
                 self.main_window.mostrar_vista_auth()
         
         elif isinstance(result, dict):
-            self._manejar_respuesta_verificacion(result)
+            # ✅ CAMBIO CRUCIAL: No importa qué camino tome el arranque,
+            # si todo es 'ok', siempre mostramos la vista de login local.
+            if result.get("status") == "ok":
+                self.main_window.setCentralWidget(self.login_view)
+            else:
+                # Si la verificación falla por alguna razón (suscripción, etc.), lo manejamos
+                self._manejar_respuesta_verificacion(result)
             
     def solicitar_login_activacion(self):
         """Configura la UI para el login de activación."""
@@ -287,7 +305,7 @@ class AppController(QObject):
         if status == "ok" and "access_token" in respuesta:
             print("Verificación exitosa. Iniciando sesión automáticamente.")
             self.api_client.set_auth_token(respuesta["access_token"])
-            self.main_window.mostrar_vista_dashboard()
+            self.main_window.setCentralWidget(self.login_view)
         
         # --- ¡NUEVA LÓGICA PARA SUSCRIPCIÓN VENCIDA! ---
         elif status == "subscription_expired":
@@ -500,3 +518,44 @@ class AppController(QObject):
     def show_error(self, message: str):
         """Muestra un diálogo de error estandarizado."""
         QMessageBox.critical(self.main_window, "Error", message)
+        
+    def _handle_local_login(self, empleado_id: str, contrasena: str):
+        """
+        Verifica las credenciales del usuario contra la DB de usuarios local.
+        """
+        # ✅ CORRECCIÓN: Usamos el atributo de la clase.
+        if not self.id_empresa_addsy:
+            self.show_error("No se pudo obtener el ID de la empresa. Reinicia la aplicación.")
+            return
+
+        db_path = DB_DIR / self.id_empresa_addsy / "databases_generales" / "usuarios.sqlite"
+        
+        if not db_path.exists():
+            self.show_error("No se encontró la base de datos de usuarios local. Por favor, realiza la activación de la cuenta.")
+            return
+            
+        conn = None
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT * FROM usuarios WHERE numero_empleado = ? OR nombre_usuario = ?", (empleado_id, empleado_id))
+            usuario_row = cursor.fetchone()
+            
+            if usuario_row:
+                usuario_info = dict(usuario_row)
+                if bcrypt.checkpw(contrasena.encode('utf-8'), usuario_info['contrasena'].encode('utf-8')):
+                    # Las credenciales son correctas, mostramos el dashboard
+                    self.main_window.setCentralWidget(DashboardView())
+                else:
+                    self.show_error("Número de empleado o contraseña incorrectos.")
+            else:
+                self.show_error("Número de empleado o contraseña incorrectos.")
+                
+        except sqlite3.Error as e:
+            self.show_error(f"Error al verificar credenciales: {e}")
+            self.main_window.mostrar_vista_auth()
+        finally:
+            if conn:
+                conn.close()
