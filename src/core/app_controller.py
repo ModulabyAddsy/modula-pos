@@ -446,7 +446,7 @@ class AppController(QObject):
                 if accion == "crear":
                     res = self.api_client.crear_sucursal_y_asignar_terminal(id_terminal_local, datos["nombre"])
                     self.api_client.set_auth_token(res["access_token"])
-                    self.main_window.mostrar_vista_dashboard()
+                    self._iniciar_arranque_inteligente()
                 elif accion == "asignar":
                     self.api_client.asignar_terminal_a_sucursal(id_terminal_local, datos["id_sucursal"])
                     QMessageBox.information(self.main_window, "Éxito", "Terminal asignada. Verificando acceso...")
