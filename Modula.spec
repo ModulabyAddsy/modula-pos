@@ -8,7 +8,8 @@ a = Analysis(
         ('src/assets', 'assets'),
         ('src/config', 'config'),
         ('src/core', 'core'),
-        ('src/ui', 'ui')
+        ('src/ui', 'ui'),
+        ('C:\\Users\\edgar\\Documents\\Addsy\\Launcher_modula\\dist\\uninstaller.exe', '.')
     ],
     hiddenimports=['httpcore', 'h11', 'anyio', 'brotli'],
     hookspath=[],
