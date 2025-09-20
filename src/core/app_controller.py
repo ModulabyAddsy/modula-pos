@@ -18,6 +18,7 @@ from src.core.local_storage import get_id_terminal, save_terminal_id, DB_DIR, ge
 from src.ui.dialogs import mostrar_dialogo_migracion, ResolverUbicacionDialog, SeleccionarSucursalDialog, RecuperarContrasenaDialog, NewTerminalDialog
 from src.ui.views.login_view import LoginView
 from src.ui.views.dashboard_view import DashboardView
+from src.core.utils import get_network_identifiers
 import time
 
 
@@ -427,32 +428,53 @@ class AppController(QObject):
 
     def handle_login_para_resolver_conflicto(self, email: str, password: str):
         try:
+            # 1. Autenticar al administrador
             self.main_window.auth_view.login_solicitado.disconnect(self.handle_login_para_resolver_conflicto)
             self.main_window.auth_view.login_solicitado.connect(self.handle_account_login_and_activate)
             self.api_client.login(email, password)
+            
+            # 2. Preparar datos para la resolución
             id_terminal_local = get_id_terminal()
             respuesta_conflicto = self.respuesta_conflicto
-            self.respuesta_conflicto = None
-            sugerencia = respuesta_conflicto.get("sugerencia_migracion")
-            if sugerencia and mostrar_dialogo_migracion(sugerencia["nombre"]):
-                self.api_client.asignar_terminal_a_sucursal(id_terminal_local, sugerencia["id"])
-                QMessageBox.information(self.main_window, "Éxito", "La terminal se ha movido de sucursal. Reiniciando verificación...")
-                self._iniciar_arranque_inteligente()
-                return
+            self.respuesta_conflicto = None # Limpiar para la próxima vez
+            
             sucursales = respuesta_conflicto.get("sucursales_existentes", [])
             dialogo = ResolverUbicacionDialog(sucursales, self.main_window)
+            
+            # 3. Mostrar diálogo al administrador para que decida qué hacer
             if dialogo.exec():
                 accion, datos = dialogo.get_resultado()
+                
+                # Recolectamos las huellas de la red actual una sola vez
+                huellas_de_red = get_network_identifiers()
+                id_sucursal_objetivo = None
+
                 if accion == "crear":
+                    # Si decide crear una nueva sucursal
                     res = self.api_client.crear_sucursal_y_asignar_terminal(id_terminal_local, datos["nombre"])
                     self.api_client.set_auth_token(res["access_token"])
-                    self._iniciar_arranque_inteligente()
+                    # El ID de la sucursal recién creada viene en el token o en la respuesta
+                    # (Asegúrate que tu API devuelva el id de la nueva sucursal)
+                    # Por ahora, asumimos que se puede obtener de alguna manera.
+                    # Para simplificar, reiniciaremos el flujo y la siguiente vez ya aparecerá.
+                    
                 elif accion == "asignar":
-                    self.api_client.asignar_terminal_a_sucursal(id_terminal_local, datos["id_sucursal"])
-                    QMessageBox.information(self.main_window, "Éxito", "Terminal asignada. Verificando acceso...")
-                    self._iniciar_arranque_inteligente()
-            else:
+                    # Si decide asignar a una sucursal existente
+                    id_sucursal_objetivo = datos["id_sucursal"]
+                    self.api_client.asignar_terminal_a_sucursal(id_terminal_local, id_sucursal_objetivo)
+                
+                # 4. EL PASO CLAVE: Anclar la red a la sucursal objetivo
+                if id_sucursal_objetivo:
+                    print(f"Anclando red a sucursal {id_sucursal_objetivo} con datos: {huellas_de_red}")
+                    self.api_client.anclar_red_a_sucursal(id_sucursal_objetivo, huellas_de_red)
+                    QMessageBox.information(self.main_window, "Éxito", "Red autorizada. Reiniciando verificación...")
+                
+                # 5. Reiniciar el proceso de arranque para una nueva verificación
+                self._iniciar_arranque_inteligente()
+
+            else: # Si el administrador cancela el diálogo
                 self.main_window.mostrar_vista_auth()
+                
         except Exception as e:
             self.show_error(f"Error resolviendo conflicto: {e}")
 

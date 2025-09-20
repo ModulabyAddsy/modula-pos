@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import hashlib
 from src.core.local_storage import calcular_hash_md5
+from src.core.utils import get_network_identifiers
 from datetime import datetime
 import uuid
 
@@ -100,19 +101,54 @@ class ApiClient:
             raise Exception("Error de conexión al buscar terminal por hardware.")
     
     def verificar_terminal(self, terminal_id: str) -> dict:
-        """Verifica una terminal en el backend."""
+        """Verifica una terminal enviando su ID de hardware y los de la red local."""
         url = f"{self.base_url}/api/v1/auth/verificar-terminal"
-        payload = {"id_terminal": terminal_id}
+        network_ids = get_network_identifiers()
+        payload = {"id_terminal": terminal_id, **network_ids}
+        
         try:
             with httpx.Client() as client:
                 response = client.post(url, json=payload, timeout=15.0)
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:
-            return e.response.json()
+            # CORRECCIÓN: Si hay un error HTTP, intentamos leer el JSON,
+            # pero si falla, devolvemos un error genérico.
+            try:
+                # El backend de FastAPI suele devolver un JSON con un campo "detail"
+                return e.response.json()
+            except Exception:
+                # Si la respuesta no es JSON (ej. un error 500), creamos un diccionario de error
+                return {"status": "error", "message": f"Error del servidor (código {e.response.status_code})"}
         except httpx.RequestError:
-            return {"detail": "No se pudo conectar con el servidor."}
+            return {"status": "error", "message": "No se pudo conectar con el servidor."}
 
+    def anclar_red_a_sucursal(self, id_sucursal: int, network_ids: dict):
+        """
+        Envía los identificadores de la red local actual al backend para
+        autorizarlos (anclarlos) para una sucursal específica.
+        """
+        if not self.auth_token:
+            raise Exception("Se requiere autenticación para anclar una red.")
+        
+        url = f"{self.base_url}/api/v1/sucursales/{id_sucursal}/anclar-red"
+        headers = {"Authorization": f"Bearer {self.auth_token}"}
+        
+        # El payload son los identificadores que recolectamos (gateway_mac, ssid)
+        payload = network_ids
+        
+        try:
+            with httpx.Client() as client:
+                response = client.post(url, headers=headers, json=payload, timeout=15.0)
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            detail = e.response.json().get("detail", e.response.text)
+            raise Exception(f"Error al anclar la red: {detail}")
+        except httpx.RequestError:
+            raise Exception("Error de conexión al intentar anclar la red.")
+
+    
     def crear_sucursal(self, nombre_sucursal: str) -> dict:
         """Llama al endpoint para crear una nueva sucursal."""
         if not self.auth_token:
