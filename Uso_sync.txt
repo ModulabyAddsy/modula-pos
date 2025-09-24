@@ -1,0 +1,15 @@
+# En un futuro archivo de lógica de ventas
+
+class ModuloVentas:
+    def __init__(self, app_controller: AppController):
+        self.controller = app_controller
+
+    def finalizar_venta(self, venta_data):
+        # 1. Guardar la venta en la base de datos local
+        guardar_venta_localmente(venta_data)
+
+        # 2. Llamar a la sincronización por evento crítico
+        print("Venta finalizada. Disparando sincronización inmediata.")
+        self.controller.sincronizar_ahora(
+            on_finished_callback=lambda status: print(f"Sincronización de venta finalizada: {status}")
+        )

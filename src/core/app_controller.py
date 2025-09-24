@@ -14,13 +14,13 @@ from PySide6.QtWidgets import QMessageBox, QInputDialog, QApplication
 from PySide6.QtCore import QTimer, QObject, Signal, QThread
 from src.ui.main_window import MainWindow
 from src.core.api_client import ApiClient
-from src.core.local_storage import get_id_terminal, save_terminal_id, DB_DIR, get_local_db_file_info, get_pending_sync_records, mark_records_as_synced, ejecutar_migracion_sql, limpiar_datos_sucursal_anterior
+from src.core.local_storage import get_id_terminal, save_terminal_id, DB_DIR, get_local_db_file_info, get_pending_sync_records, mark_records_as_synced, ejecutar_migracion_sql, limpiar_datos_sucursal_anterior, get_last_sync_timestamps, apply_deltas
 from src.ui.dialogs import mostrar_dialogo_migracion, ResolverUbicacionDialog, SeleccionarSucursalDialog, RecuperarContrasenaDialog, NewTerminalDialog
 from src.ui.views.login_view import LoginView
 from src.ui.views.dashboard_view import DashboardView
 from src.core.utils import get_network_identifiers
 import time
-
+from PySide6.QtCore import QTimer
 
 class StartupWorker(QObject):
     """
@@ -183,6 +183,44 @@ class LoginWorker(QObject):
         except Exception as e:
             self.finished.emit({"status": "error", "message": f"Error en el proceso de activación: {e}"})
 
+class SyncWorker(QObject):
+    """Ejecuta la sincronización delta en un hilo secundario."""
+    finished = Signal(str)
+    
+    def __init__(self, controller):
+        super().__init__()
+        self.api_client = controller.api_client
+        self.id_empresa = controller.id_empresa_addsy
+
+    def run(self):
+        try:
+            # FASE 1: PUSH (Enviar cambios locales)
+            print("🔄 [SYNC] Buscando y enviando cambios locales...")
+            pending_pushes = get_pending_sync_records(self.id_empresa)
+            if pending_pushes:
+                for push_data in pending_pushes:
+                    pk_column = TABLE_PRIMARY_KEYS.get(push_data['table_name'], 'uuid')
+                    push_data['primary_key_column'] = pk_column
+                    for record in push_data['records']:
+                        if 'id' in record: del record['id']
+                    self.api_client.push_records(push_data)
+            
+            # FASE 2: PULL (Recibir cambios de la nube)
+            print("🔄 [SYNC] Solicitando cambios de otras terminales...")
+            timestamps_locales = get_last_sync_timestamps(self.id_empresa)
+            delta_package = self.api_client.get_deltas(timestamps_locales)
+            
+            if delta_package:
+                apply_deltas(self.id_empresa, delta_package)
+
+            # FASE 3: LIMPIEZA
+            mark_records_as_synced(self.id_empresa)
+            self.finished.emit("success")
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.finished.emit(str(e))
+
 class AppController(QObject):
     """Controla todo el flujo de la aplicación."""
     def __init__(self, app):
@@ -190,14 +228,24 @@ class AppController(QObject):
         self.app = app
         self.api_client = ApiClient()
         self.main_window = MainWindow()
-        self.thread = None
-        self.worker = None
+
+        # Atributos únicos para CADA tarea asíncrona
+        self.startup_thread = None
+        self.startup_worker = None
+        self.auth_thread = None  # Usaremos este para login y registro
+        self.auth_worker = None
+        self.sync_thread = None  # Dedicado EXCLUSIVAMENTE a la sincronización
+        self.sync_worker = None
+        
         self.respuesta_conflicto = None
         self.claim_token = None
         self.polling_timer = QTimer()
         self.polling_timer.timeout.connect(self._poll_for_activation)
         
         self.id_empresa_addsy = None
+        
+        self.sync_timer = QTimer(self)
+        self.sync_timer.timeout.connect(self.sincronizar_ahora)
         
         self.login_view = LoginView()
         self._connect_signals()
@@ -218,19 +266,21 @@ class AppController(QObject):
         """Inicia la lógica de arranque en un hilo secundario."""
         self.main_window.mostrar_vista_carga()
         
-        self.thread = QThread()
-        self.worker = StartupWorker(self)
-        self.worker.moveToThread(self.thread)
+        self.startup_thread = QThread()
+        self.startup_worker = StartupWorker(self)
+        self.startup_worker.moveToThread(self.startup_thread)
 
-        self.thread.started.connect(self.worker.run)
-        self.worker.progress.connect(self.main_window.loading_view.update_status)
-        self.worker.finished.connect(self.handle_startup_result)
+        self.startup_thread.started.connect(self.startup_worker.run)
+        self.startup_worker.progress.connect(self.main_window.loading_view.update_status)
+        self.startup_worker.finished.connect(self.handle_startup_result)
         
-        self.worker.finished.connect(self.thread.quit)
-        self.worker.finished.connect(self.worker.deleteLater)
-        self.thread.finished.connect(self.thread.deleteLater)
+        self.startup_worker.finished.connect(self.startup_thread.quit)
+        self.startup_worker.finished.connect(self.startup_worker.deleteLater)
+        self.startup_thread.finished.connect(self.startup_thread.deleteLater)
+        # Limpia también la referencia al finalizar
+        self.startup_thread.finished.connect(lambda: setattr(self, 'startup_thread', None))
         
-        self.thread.start()
+        self.startup_thread.start()
 
     def _execute_startup_logic(self):
         """
@@ -266,6 +316,9 @@ class AppController(QObject):
             else:
                 self.show_error(result.get("message", "Error desconocido en el arranque."))
                 self.main_window.mostrar_vista_auth()
+            
+            self.thread = None
+            self.worker = None
         
         elif isinstance(result, dict):
             # ✅ CAMBIO CRUCIAL: No importa qué camino tome el arranque,
@@ -570,6 +623,9 @@ class AppController(QObject):
                 if bcrypt.checkpw(contrasena.encode('utf-8'), usuario_info['contrasena'].encode('utf-8')):
                     # Las credenciales son correctas, mostramos el dashboard
                     self.main_window.setCentralWidget(DashboardView())
+                    # Se ejecuta cada 20,000 milisegundos (20 segundos).
+                    self.sync_timer.start(20000)
+                    print("🔄 Sincronización periódica iniciada (cada 20 segundos).")
                 else:
                     self.show_error("Número de empleado o contraseña incorrectos.")
             else:
@@ -581,3 +637,58 @@ class AppController(QObject):
         finally:
             if conn:
                 conn.close()
+          
+    def _on_sync_finished(self, status):
+        """
+        Esta función ahora se ejecuta en el HILO PRINCIPAL.
+        Orquesta de forma segura la detención y limpieza del hilo de trabajo.
+        """
+        print(f"✅ Sincronización finalizada con estado: {status}. Limpiando recursos de sync.")
+        
+        if self.sync_thread:
+            # 1. Pide al hilo que termine.
+            self.sync_thread.quit()
+            # 2. ESPERA a que realmente termine. Esto ya no causa un error
+            #    porque estamos llamando a wait() desde el hilo principal.
+            self.sync_thread.wait()
+
+        # 3. Anula las referencias de forma segura.
+        self.sync_thread = None
+        self.sync_worker = None
+
+        # 4. Ejecuta el callback que guardamos temporalmente.
+        if self.sync_callback:
+            self.sync_callback(status)
+            self.sync_callback = None # Limpiamos el callback para la próxima vez.
+
+    def sincronizar_ahora(self, on_finished_callback=None):
+        """
+        Ahora guarda el callback y usa una conexión de señal directa,
+        lo que garantiza que _on_sync_finished se ejecute en el hilo principal.
+        """
+        if self.sync_thread and self.sync_thread.isRunning():
+            print("ℹ️  [SYNC] Intento de sincronización omitido, ya hay un proceso en curso.")
+            if on_finished_callback:
+                on_finished_callback("skipped")
+            return
+
+        # Guardamos temporalmente el callback para esta ejecución específica.
+        self.sync_callback = on_finished_callback
+
+        self.sync_thread = QThread()
+        self.sync_worker = SyncWorker(self)
+        self.sync_worker.moveToThread(self.sync_thread)
+
+        # --- CONEXIÓN SIMPLIFICADA ---
+        # Al conectar directamente, Qt se encarga de que la función _on_sync_finished
+        # se invoque de forma segura en el hilo del objeto receptor (el hilo principal).
+        self.sync_worker.finished.connect(self._on_sync_finished)
+        
+        self.sync_thread.started.connect(self.sync_worker.run)
+        
+        # Estas conexiones de autodestrucción siguen siendo seguras.
+        self.sync_worker.finished.connect(self.sync_worker.deleteLater)
+        self.sync_thread.finished.connect(self.sync_thread.deleteLater)
+        
+        print("🚀 [SYNC] Iniciando nueva sincronización en segundo plano...")
+        self.sync_thread.start()

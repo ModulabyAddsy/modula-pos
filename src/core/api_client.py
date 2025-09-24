@@ -427,3 +427,16 @@ class ApiClient:
         except Exception as e:
             print(f"❌ Error al descargar {key_path}: {e}")
             return False
+        
+    def get_deltas(self, sync_timestamps: dict) -> dict:
+        """Pide al backend los registros que han cambiado desde los timestamps dados."""
+        if not self.auth_token: raise Exception("Autenticación requerida.")
+        url = f"{self.base_url}/api/v1/sync/get-deltas"
+        headers = {"Authorization": f"Bearer {self.auth_token}"}
+        try:
+            with httpx.Client() as client:
+                response = client.post(url, headers=headers, json=sync_timestamps, timeout=30.0)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            raise Exception(f"Error al obtener deltas: {e}")

@@ -206,8 +206,172 @@ def get_pending_sync_records(id_empresa: str) -> list:
 
 def mark_records_as_synced(id_empresa: str):
     """
-    Una vez que la sincronización es exitosa, resetea la bandera 'needs_sync' a 0 en todos los registros.
+    Una vez que la sincronización es exitosa, resetea la bandera 'needs_sync' a 0
+    en todos los registros de todas las bases de datos locales.
     """
     company_root_path = DB_DIR / id_empresa
-    # ... Lógica similar a la anterior, pero para ejecutar UPDATE ... SET needs_sync = 0 WHERE needs_sync = 1
+    if not company_root_path.exists():
+        return
+
     print("✅ Banderas 'needs_sync' locales reseteadas.")
+    for db_path in company_root_path.rglob('*.sqlite'):
+        conn = None
+        try:
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = [row[0] for row in cursor.fetchall()]
+
+            for table in tables:
+                cursor.execute(f"PRAGMA table_info('{table}')")
+                columns = [info[1] for info in cursor.fetchall()]
+                if 'needs_sync' in columns:
+                    cursor.execute(f"UPDATE {table} SET needs_sync = 0 WHERE needs_sync = 1")
+            
+            conn.commit()
+        except sqlite3.Error as e:
+            print(f"⚠️  Advertencia al resetear banderas en {db_path.name}: {e}")
+        finally:
+            if conn:
+                conn.close()
+    
+def get_last_sync_timestamps(id_empresa: str) -> dict:
+    """
+    Escanea las DBs locales para encontrar el timestamp UTC más reciente de cada tabla,
+    normalizando todos los valores al formato ISO 8601 antes de enviarlos al servidor.
+    """
+    timestamps = {}
+    company_root_path = DB_DIR / id_empresa
+    if not company_root_path.exists():
+        return {}
+
+    for db_path in company_root_path.rglob('*.sqlite'):
+        conn = None
+        try:
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+            tables = [row[0] for row in cursor.fetchall()]
+            
+            for table in tables:
+                cursor.execute(f"PRAGMA table_info('{table}')")
+                columns = [info[1] for info in cursor.fetchall()]
+                if 'last_modified' in columns:
+                    query = f"SELECT MAX(last_modified) FROM {table}"
+                    cursor.execute(query)
+                    max_ts = cursor.fetchone()[0]
+                    
+                    if max_ts:
+                        # --- ▼▼▼ AQUÍ ESTÁ LA CORRECCIÓN CLAVE ▼▼▼ ---
+                        # Se normaliza el timestamp para evitar errores en el backend.
+                        try:
+                            # 1. Intenta tratar el valor como un número (timestamp de Unix).
+                            #    Usamos float() para ser flexibles con decimales.
+                            unix_ts = int(float(max_ts))
+                            # 2. Si tiene éxito, lo convierte a un objeto datetime con zona horaria UTC.
+                            dt_object = datetime.fromtimestamp(unix_ts, tz=timezone.utc)
+                            # 3. Lo formatea al estándar ISO 8601 que el servidor espera.
+                            timestamps[table] = dt_object.isoformat()
+                        except (ValueError, TypeError):
+                            # 4. Si falla la conversión a número, significa que ya es un texto.
+                            #    Asumimos que está en el formato correcto y lo usamos directamente.
+                            timestamps[table] = str(max_ts)
+                        # --- ▲▲▲ FIN DE LA CORRECCIÓN ▲▲▲ ---
+                    else:
+                        # Si la tabla está vacía, usamos una fecha "cero" para pedir todo.
+                        timestamps[table] = "1970-01-01T00:00:00+00:00"
+
+        except sqlite3.Error as e:
+            print(f"Advertencia: No se pudo leer timestamps de {db_path.name}: {e}")
+        finally:
+            if conn:
+                conn.close()
+                
+    print(f"DEBUG CLIENTE: Timestamps que se enviarán al servidor: {timestamps}")
+    return timestamps
+
+
+
+def _build_table_to_db_map(id_empresa: str) -> dict:
+    """
+    Crea un mapa de {nombre_tabla: ruta_completa_al_archivo_db}.
+    """
+    table_map = {}
+    company_root_path = DB_DIR / id_empresa
+    if not company_root_path.exists():
+        return {}
+
+    for db_path in company_root_path.rglob('*.sqlite'):
+        conn = None
+        try:
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+            tables = [row[0] for row in cursor.fetchall()]
+            for table in tables:
+                table_map[table] = db_path
+        except Exception as e:
+            print(f"Advertencia: No se pudo leer el mapa de tablas de {db_path}: {e}")
+        finally:
+            if conn:
+                conn.close()
+    return table_map
+
+def apply_deltas(id_empresa: str, delta_package: dict):
+    """
+    Recibe un paquete de cambios desde el servidor y los aplica a las DBs locales.
+    Versión corregida SIN la cláusula WHERE en el UPDATE.
+    """
+    print("--- Iniciando apply_deltas ---")
+    print(f"DEBUG: Paquete de cambios recibido: {delta_package}")
+
+    table_map = _build_table_to_db_map(id_empresa)
+    if not table_map:
+        print("❌ Error crítico: No se pudo construir el mapa de tablas locales.")
+        return
+
+    db_connections = {}
+    try:
+        for table_name, records in delta_package.items():
+            if not records: continue
+
+            db_path = table_map.get(table_name)
+            if not db_path:
+                print(f"⚠️  Advertencia: No se encontró DB local para la tabla '{table_name}'.")
+                continue
+
+            conn = db_connections.setdefault(db_path, sqlite3.connect(db_path))
+            cursor = conn.cursor()
+
+            for record in records:
+                # El servidor es la autoridad, siempre marcamos como sincronizado.
+                record['needs_sync'] = 0
+                
+                columns = ", ".join(record.keys())
+                placeholders = ", ".join([f":{k}" for k in record.keys()])
+                pk_column = "uuid"
+                
+                # Construimos la cláusula SET para actualizar todos los campos excepto la PK
+                update_assignments = ", ".join([f"{key} = excluded.{key}" for key in record.keys() if key != pk_column])
+
+                # --- LA CONSULTA CORREGIDA ---
+                # Se eliminó la cláusula "WHERE excluded.last_modified > ..."
+                # para forzar la actualización y el seteo de needs_sync = 0.
+                sql = (f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders}) "
+                       f"ON CONFLICT({pk_column}) DO UPDATE SET {update_assignments};")
+                
+                cursor.execute(sql, record)
+
+        for conn in db_connections.values():
+            conn.commit()
+
+        print(f"✅ {sum(len(v) for v in delta_package.values())} cambios de la nube aplicados localmente.")
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"❌ Error aplicando deltas: {e}")
+    finally:
+        for conn in db_connections.values():
+            conn.rollback()
+            conn.close()
