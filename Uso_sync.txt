@@ -13,3 +13,40 @@ class ModuloVentas:
         self.controller.sincronizar_ahora(
             on_finished_callback=lambda status: print(f"Sincronización de venta finalizada: {status}")
         )
+
+# Ejemplo de uso en un futuro módulo de la interfaz
+
+# import src.core.local_storage as local_storage
+# from src.core.app_controller import AppController
+
+class ModuloVentas:
+    def __init__(self, app_controller: AppController):
+        # El módulo recibe una referencia al controlador principal para poder llamarlo
+        self.app_controller = app_controller
+
+    def finalizar_venta(self, datos_de_la_venta: dict):
+        """
+        Procesa el final de una venta, la guarda y dispara la sincronización.
+        """
+        print("Finalizando venta...")
+        try:
+            # Línea 1: Guardar la venta localmente. La función se encarga de todo.
+            nuevo_uuid = local_storage.guardar_nuevo_registro('ventas', datos_de_la_venta)
+            
+            # Línea 2: Disparar la sincronización en segundo plano.
+            print(f"Venta {nuevo_uuid} guardada. Disparando sincronización...")
+            self.app_controller.sincronizar_ahora(
+                on_finished_callback=lambda status: self.on_venta_sincronizada(status, nuevo_uuid)
+            )
+
+        except Exception as e:
+            # Aquí manejas el error si el guardado local falla
+            print(f"No se pudo guardar la venta: {e}")
+            # Mostrar un mensaje de error al usuario, etc.
+
+    def on_venta_sincronizada(self, status: str, uuid_venta: str):
+        """Callback que se ejecuta cuando la sincronización termina."""
+        if status == 'success':
+            print(f"✅ Venta {uuid_venta} sincronizada con la nube exitosamente.")
+        else:
+            print(f"⚠️  La sincronización de la venta {uuid_venta} falló con estado: {status}")

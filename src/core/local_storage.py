@@ -160,17 +160,20 @@ def ejecutar_migracion_sql(db_path: Path, comandos: list[str]):
             
 def get_pending_sync_records(id_empresa: str) -> list:
     """
-    Scans all local DBs and extracts records marked with needs_sync = 1,
-    ensuring that the UUID and dates are in the correct string format.
+    Escanea todas las DBs locales, extrae los registros con needs_sync = 1
+    y los empaqueta correctamente para el endpoint de PUSH.
     """
     all_pending_pushes = []
     company_root_path = DB_DIR / id_empresa
     if not company_root_path.exists():
         return []
 
+    # Este diccionario es crucial para decirle al backend cuál es la clave primaria de cada tabla
+    TABLE_PRIMARY_KEYS = {'egresos': 'uuid', 'usuarios': 'uuid', 'ingresos': 'uuid'}
+
     for db_path in company_root_path.rglob('*.sqlite'):
         conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row  # To access results as dictionaries
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
@@ -183,23 +186,26 @@ def get_pending_sync_records(id_empresa: str) -> list:
                 cursor.execute(f"SELECT * FROM {table} WHERE needs_sync = 1")
                 records_to_sync = [dict(row) for row in cursor.fetchall()]
 
+                # Normalizamos los datos antes de enviarlos (esto ya estaba bien)
                 for record in records_to_sync:
-                    # ✅ CRITICAL FIX 1: Convert UUID to string if it exists
                     if 'uuid' in record and record['uuid'] is not None:
                         record['uuid'] = str(record['uuid'])
-
-                    # ✅ CRITICAL FIX 2: Convert last_modified to string if it exists
                     if 'last_modified' in record and record['last_modified'] is not None:
-                        # Convert datetime object to ISO 8601 string, which is standard for APIs
                         record['last_modified'] = str(record['last_modified'])
-
 
                 if records_to_sync:
                     db_relative_path = db_path.relative_to(DB_DIR).as_posix()
+                    
+                    # --- ▼▼▼ LA CORRECCIÓN CLAVE ▼▼▼ ---
+                    # El servidor necesita saber explícitamente cuál es la columna
+                    # que funciona como clave primaria para hacer el 'ON CONFLICT'.
+                    pk_column = TABLE_PRIMARY_KEYS.get(table, 'uuid') # Usamos 'uuid' por defecto
+
                     all_pending_pushes.append({
                         "db_relative_path": db_relative_path,
                         "table_name": table,
-                        "records": records_to_sync
+                        "records": records_to_sync,
+                        "primary_key_column": pk_column # <-- CAMPO AÑADIDO
                     })
         conn.close()
     return all_pending_pushes
@@ -235,7 +241,7 @@ def mark_records_as_synced(id_empresa: str):
             if conn:
                 conn.close()
     
-def get_last_sync_timestamps(id_empresa: str) -> dict:
+def _get_local_max_timestamps(id_empresa: str) -> dict:
     """
     Escanea las DBs locales para encontrar el timestamp UTC más reciente de cada tabla,
     normalizando todos los valores al formato ISO 8601 antes de enviarlos al servidor.
@@ -290,6 +296,15 @@ def get_last_sync_timestamps(id_empresa: str) -> dict:
     print(f"DEBUG CLIENTE: Timestamps que se enviarán al servidor: {timestamps}")
     return timestamps
 
+def get_last_sync_timestamps(id_empresa: str) -> dict:
+    """
+    Obtiene el último timestamp exitoso guardado del servidor.
+    Este es el único marcador que usaremos para el PULL.
+    """
+    last_sync = get_last_server_sync_timestamp(id_empresa)
+    # Devolvemos un diccionario porque el backend espera uno. Usamos un
+    # marcador genérico 'global' que el backend ignorará (sólo le importa el valor).
+    return {"global": last_sync}
 
 
 def _build_table_to_db_map(id_empresa: str) -> dict:
@@ -317,6 +332,32 @@ def _build_table_to_db_map(id_empresa: str) -> dict:
                 conn.close()
     return table_map
 
+def _debug_inspect_local_db(db_path, table_name, uuids_to_check):
+    """
+    Función temporal para conectar a una DB local e imprimir el estado
+    de 'needs_sync' para UUIDs específicos.
+    """
+    if not uuids_to_check:
+        return
+    print(f"--- 🕵️  INSPECCIÓN DE DEBUG EN {table_name} ---")
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        for uuid in uuids_to_check:
+            cursor.execute(f"SELECT uuid, needs_sync FROM {table_name} WHERE uuid = ?", (uuid,))
+            result = cursor.fetchone()
+            if result:
+                print(f"INSPECT: UUID {result[0]} -> needs_sync = {result[1]}")
+            else:
+                print(f"INSPECT: UUID {uuid} -> No encontrado.")
+    except Exception as e:
+        print(f"INSPECT_ERROR: {e}")
+    finally:
+        if conn:
+            conn.close()
+    print("--- 🕵️  FIN DE INSPECCIÓN ---")
+
 def apply_deltas(id_empresa: str, delta_package: dict):
     """
     Recibe un paquete de cambios desde el servidor y los aplica a las DBs locales.
@@ -343,6 +384,7 @@ def apply_deltas(id_empresa: str, delta_package: dict):
             conn = db_connections.setdefault(db_path, sqlite3.connect(db_path))
             cursor = conn.cursor()
 
+            uuids_procesados = [r['uuid'] for r in records]
             for record in records:
                 # El servidor es la autoridad, siempre marcamos como sincronizado.
                 record['needs_sync'] = 0
@@ -361,7 +403,7 @@ def apply_deltas(id_empresa: str, delta_package: dict):
                        f"ON CONFLICT({pk_column}) DO UPDATE SET {update_assignments};")
                 
                 cursor.execute(sql, record)
-
+            _debug_inspect_local_db(db_path, table_name, uuids_procesados)
         for conn in db_connections.values():
             conn.commit()
 
@@ -374,4 +416,79 @@ def apply_deltas(id_empresa: str, delta_package: dict):
     finally:
         for conn in db_connections.values():
             conn.rollback()
+            conn.close()
+
+def save_last_server_sync_timestamp(id_empresa: str, timestamp: str):
+    """Guarda el último timestamp exitoso del servidor en un archivo de estado."""
+    sync_state_path = DB_DIR / id_empresa / "sync_state.json"
+    sync_state_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(sync_state_path, "w") as f:
+        json.dump({"last_server_sync": timestamp}, f)
+    print(f"✅ Marcador de sincronización guardado: {timestamp}")
+
+def get_last_server_sync_timestamp(id_empresa: str) -> str:
+    """Lee el último timestamp guardado del servidor."""
+    sync_state_path = DB_DIR / id_empresa / "sync_state.json"
+    if not sync_state_path.exists():
+        # Si nunca se ha sincronizado, devuelve la fecha mínima.
+        return "1970-01-01T00:00:00+00:00"
+    with open(sync_state_path, "r") as f:
+        data = json.load(f)
+        return data.get("last_server_sync", "1970-01-01T00:00:00+00:00")
+    
+def guardar_nuevo_registro(table_name: str, data_dict: dict) -> str:
+    """
+    Guarda un nuevo registro en la tabla especificada, añadiendo automáticamente
+    uuid, last_modified y la bandera needs_sync.
+
+    Args:
+        table_name: El nombre de la tabla (ej. 'ventas', 'egresos').
+        data_dict: Un diccionario con los datos del registro.
+
+    Returns:
+        El UUID del nuevo registro creado.
+    """
+    # 1. Enriquecer el registro con metadatos de sincronización
+    data_dict['uuid'] = str(uuid.uuid4())
+    data_dict['last_modified'] = datetime.now(timezone.utc).isoformat()
+    data_dict['needs_sync'] = 1
+
+    # 2. Determinar en qué archivo de base de datos se debe guardar
+    # (Esta es una función de ayuda que podrías necesitar crear o adaptar)
+    id_empresa = "MOD_EMP_1001" # Debes obtener esto de una configuración global
+    id_sucursal = 52          # O de la sesión actual
+    
+    # Lógica simple para decidir la ruta de la DB
+    if table_name in ['usuarios']:
+        db_path = DB_DIR / id_empresa / "databases_generales" / f"{table_name}.sqlite"
+    else:
+        db_path = DB_DIR / id_empresa / f"suc_{id_sucursal}" / f"{table_name}.sqlite"
+
+    if not db_path.exists():
+        raise FileNotFoundError(f"La base de datos para la tabla '{table_name}' no existe en {db_path}")
+
+    # 3. Construir y ejecutar la consulta SQL
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        columns = ", ".join(data_dict.keys())
+        placeholders = ", ".join([f":{k}" for k in data_dict.keys()])
+        
+        sql = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
+        
+        cursor.execute(sql, data_dict)
+        conn.commit()
+        
+        print(f"✅ Registro guardado localmente en '{table_name}' con UUID: {data_dict['uuid']}")
+        return data_dict['uuid']
+
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        print(f"🔥🔥 ERROR al guardar nuevo registro en {table_name}: {e}")
+        raise # Re-lanza la excepción para que el módulo que la llamó sepa que falló
+    finally:
+        if conn:
             conn.close()
