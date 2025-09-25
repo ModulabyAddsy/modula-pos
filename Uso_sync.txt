@@ -1,52 +1,72 @@
-# En un futuro archivo de lógica de ventas
+# Asumimos que este código vive en un archivo como 'src/core/modules/ventas_module.py'
+
+import src.core.local_storage as local_storage
+from src.core.app_controller import AppController
 
 class ModuloVentas:
     def __init__(self, app_controller: AppController):
-        self.controller = app_controller
-
-    def finalizar_venta(self, venta_data):
-        # 1. Guardar la venta en la base de datos local
-        guardar_venta_localmente(venta_data)
-
-        # 2. Llamar a la sincronización por evento crítico
-        print("Venta finalizada. Disparando sincronización inmediata.")
-        self.controller.sincronizar_ahora(
-            on_finished_callback=lambda status: print(f"Sincronización de venta finalizada: {status}")
-        )
-
-# Ejemplo de uso en un futuro módulo de la interfaz
-
-# import src.core.local_storage as local_storage
-# from src.core.app_controller import AppController
-
-class ModuloVentas:
-    def __init__(self, app_controller: AppController):
-        # El módulo recibe una referencia al controlador principal para poder llamarlo
+        """
+        El módulo recibe una referencia al controlador principal para poder
+        llamar a la función de sincronización.
+        """
         self.app_controller = app_controller
 
-    def finalizar_venta(self, datos_de_la_venta: dict):
+    def cerrar_venta(self, items_vendidos: list, cliente_id: str, total: float, metodo_pago: str):
         """
-        Procesa el final de una venta, la guarda y dispara la sincronización.
+        Esta es la función que se llama desde la UI para finalizar una venta.
+        Orquesta todo el proceso de guardado y sincronización.
         """
-        print("Finalizando venta...")
+        print("▶️  Iniciando proceso para cerrar venta...")
+
+        # 1. Preparamos el diccionario con los datos que se guardarán en la tabla 'ventas'.
+        #    Asegúrate de que las claves coincidan con las columnas de tu DB.
+        datos_nueva_venta = {
+            "total_venta": total,
+            "metodo_pago": metodo_pago,
+            "id_cliente": cliente_id,
+            "id_usuario": self.app_controller.usuario_actual['uuid'], # Obtenemos el usuario de la sesión
+            "detalles_venta": self.convertir_items_a_json(items_vendidos) # Ejemplo de un campo JSON
+        }
+
+        # --- PASO 1: GUARDAR LA VENTA ---
         try:
-            # Línea 1: Guardar la venta localmente. La función se encarga de todo.
-            nuevo_uuid = local_storage.guardar_nuevo_registro('ventas', datos_de_la_venta)
-            
-            # Línea 2: Disparar la sincronización en segundo plano.
-            print(f"Venta {nuevo_uuid} guardada. Disparando sincronización...")
-            self.app_controller.sincronizar_ahora(
-                on_finished_callback=lambda status: self.on_venta_sincronizada(status, nuevo_uuid)
+            # Usamos nuestra función universal. Se guarda localmente y se marca con needs_sync = 1.
+            nuevo_uuid = local_storage.guardar_nuevo_registro(
+                self.app_controller.id_empresa_addsy,
+                self.app_controller.id_sucursal_actual, # Atributo que deberías tener en AppController
+                'ventas',
+                datos_nueva_venta
             )
+            print(f"✅ Venta {nuevo_uuid} guardada localmente. Lista para ser enviada.")
 
         except Exception as e:
-            # Aquí manejas el error si el guardado local falla
-            print(f"No se pudo guardar la venta: {e}")
-            # Mostrar un mensaje de error al usuario, etc.
+            print(f"🔥🔥 ERROR CRÍTICO: No se pudo guardar la venta localmente. {e}")
+            # Aquí deberías mostrar un error grave al usuario. La venta no se guardó.
+            self.app_controller.show_error("No se pudo registrar la venta. Revisa la conexión.")
+            return # Detenemos el flujo
+
+        # --- PASO 2 Y 3: ENVIAR Y SINCRONIZAR ---
+        # Con una sola línea, le pedimos al controlador que inicie la sincronización
+        # en segundo plano. La UI nunca se congelará.
+        print("🔄 Disparando la sincronización en segundo plano...")
+        self.app_controller.sincronizar_ahora(
+            on_finished_callback=lambda status: self.on_venta_sincronizada(status, nuevo_uuid)
+        )
+
+        print("✅ Proceso de venta finalizado en la UI. La sincronización se completará por detrás.")
 
     def on_venta_sincronizada(self, status: str, uuid_venta: str):
-        """Callback que se ejecuta cuando la sincronización termina."""
+        """
+        Este es el 'callback' que se ejecuta cuando el SyncWorker termina.
+        Es opcional, pero muy útil para dar feedback al usuario.
+        """
         if status == 'success':
-            print(f"✅ Venta {uuid_venta} sincronizada con la nube exitosamente.")
+            print(f"☁️  ¡Éxito! La venta {uuid_venta} ya está en la nube.")
+            # Aquí podrías cambiar un icono en la UI de "pendiente" a "sincronizado".
         else:
-            print(f"⚠️  La sincronización de la venta {uuid_venta} falló con estado: {status}")
+            print(f"⚠️  La sincronización de la venta {uuid_venta} falló. Se reintentará automáticamente más tarde.")
+            
+    def convertir_items_a_json(self, items: list) -> str:
+        # Función de ayuda para convertir la lista de productos a un string JSON
+        import json
+        return json.dumps(items)

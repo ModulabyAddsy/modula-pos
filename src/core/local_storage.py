@@ -6,6 +6,10 @@ from datetime import datetime, timezone
 import shutil 
 import sqlite3
 import hashlib
+import uuid
+from src.config.schema_config import TABLE_PRIMARY_KEYS, TABLAS_GENERALES
+import bcrypt
+
 # --- RUTA DE CONFIGURACIÓN ESTÁNDAR ---
 # Se define una única ubicación para el archivo de configuración.
 # Usar os.getenv('APPDATA') es una práctica común en Windows para encontrar la carpeta
@@ -436,38 +440,35 @@ def get_last_server_sync_timestamp(id_empresa: str) -> str:
         data = json.load(f)
         return data.get("last_server_sync", "1970-01-01T00:00:00+00:00")
     
-def guardar_nuevo_registro(table_name: str, data_dict: dict) -> str:
+def guardar_nuevo_registro(id_empresa: str, id_sucursal: int, table_name: str, data_dict: dict) -> str:
     """
     Guarda un nuevo registro en la tabla especificada, añadiendo automáticamente
     uuid, last_modified y la bandera needs_sync.
 
     Args:
+        id_empresa: El ID de la empresa actual (ej. 'MOD_EMP_1001').
+        id_sucursal: El ID de la sucursal actual (ej. 52).
         table_name: El nombre de la tabla (ej. 'ventas', 'egresos').
         data_dict: Un diccionario con los datos del registro.
 
     Returns:
         El UUID del nuevo registro creado.
     """
-    # 1. Enriquecer el registro con metadatos de sincronización
+    # 1. Enriquecer el registro con metadatos de sincronización (¡Correcto!)
     data_dict['uuid'] = str(uuid.uuid4())
     data_dict['last_modified'] = datetime.now(timezone.utc).isoformat()
     data_dict['needs_sync'] = 1
 
-    # 2. Determinar en qué archivo de base de datos se debe guardar
-    # (Esta es una función de ayuda que podrías necesitar crear o adaptar)
-    id_empresa = "MOD_EMP_1001" # Debes obtener esto de una configuración global
-    id_sucursal = 52          # O de la sesión actual
-    
-    # Lógica simple para decidir la ruta de la DB
-    if table_name in ['usuarios']:
+    # 2. Determinar la ruta de la base de datos (Lógica mejorada)
+    if table_name in TABLAS_GENERALES:
         db_path = DB_DIR / id_empresa / "databases_generales" / f"{table_name}.sqlite"
     else:
         db_path = DB_DIR / id_empresa / f"suc_{id_sucursal}" / f"{table_name}.sqlite"
-
+        
     if not db_path.exists():
         raise FileNotFoundError(f"La base de datos para la tabla '{table_name}' no existe en {db_path}")
 
-    # 3. Construir y ejecutar la consulta SQL
+    # 3. Construir y ejecutar la consulta SQL (Intacto, estaba bien)
     conn = None
     try:
         conn = sqlite3.connect(db_path)
@@ -488,7 +489,100 @@ def guardar_nuevo_registro(table_name: str, data_dict: dict) -> str:
         if conn:
             conn.rollback()
         print(f"🔥🔥 ERROR al guardar nuevo registro en {table_name}: {e}")
-        raise # Re-lanza la excepción para que el módulo que la llamó sepa que falló
+        raise
     finally:
         if conn:
             conn.close()
+
+def actualizar_contrasena_usuario(id_empresa: str, uuid_usuario: str, nueva_contrasena_plana: str):
+    """
+    Hashea una nueva contraseña y actualiza el registro del usuario en la DB local,
+    marcando el cambio para sincronización.
+    """
+    # 1. Hashear la nueva contraseña
+    bytes_contrasena = nueva_contrasena_plana.encode('utf-8')
+    contrasena_hash = bcrypt.hashpw(bytes_contrasena, bcrypt.gensalt()).decode('utf-8')
+
+    # 2. Preparar la actualización
+    db_path = DB_DIR / id_empresa / "databases_generales" / "usuarios.sqlite"
+    ahora_iso = datetime.now(timezone.utc).isoformat()
+    
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        sql = """
+            UPDATE usuarios
+            SET 
+                contrasena = ?,
+                cambio_contrasena_obligatorio = 0,
+                needs_sync = 1,
+                last_modified = ?
+            WHERE uuid = ?;
+        """
+        
+        cursor.execute(sql, (contrasena_hash, ahora_iso, uuid_usuario))
+        conn.commit()
+        
+        print(f"✅ Contraseña actualizada localmente para el usuario {uuid_usuario}.")
+    
+    except Exception as e:
+        if conn: conn.rollback()
+        print(f"🔥🔥 ERROR al actualizar la contraseña para {uuid_usuario}: {e}")
+        raise
+    finally:
+        if conn: conn.close()
+        
+def actualizar_registro(id_empresa: str, id_sucursal: int, table_name: str, uuid_registro: str, data_a_actualizar: dict):
+    """
+    Actualiza uno o más campos de un registro existente, usando su UUID.
+    Automáticamente actualiza 'last_modified' y 'needs_sync'.
+
+    Args:
+        id_empresa: El ID de la empresa actual.
+        id_sucursal: El ID de la sucursal actual.
+        table_name: El nombre de la tabla (ej. 'usuarios', 'ventas').
+        uuid_registro: El UUID del registro que se va a modificar.
+        data_a_actualizar: Un diccionario con los campos y nuevos valores.
+                           Ej: {'contrasena': 'nuevo_hash', 'campo_obligatorio': 0}
+    """
+    # 1. Enriquecer los datos con metadatos de sincronización
+    data_a_actualizar['last_modified'] = datetime.now(timezone.utc).isoformat()
+    data_a_actualizar['needs_sync'] = 1
+
+    # 2. Determinar la ruta de la DB usando la configuración central
+    if table_name in TABLAS_GENERALES:
+        db_path = DB_DIR / id_empresa / "databases_generales" / f"{table_name}.sqlite"
+    else:
+        db_path = DB_DIR / id_empresa / f"suc_{id_sucursal}" / f"{table_name}.sqlite"
+
+    if not db_path.exists():
+        raise FileNotFoundError(f"La base de datos para la tabla '{table_name}' no existe.")
+
+    # 3. Construir la consulta UPDATE dinámicamente
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        # Crea la parte "SET" de la consulta: "campo1 = ?, campo2 = ?, ..."
+        set_clause = ", ".join([f"{key} = ?" for key in data_a_actualizar.keys()])
+        
+        # Prepara los valores en el orden correcto, con el UUID al final para el WHERE
+        valores = list(data_a_actualizar.values())
+        valores.append(uuid_registro)
+        
+        sql = f"UPDATE {table_name} SET {set_clause} WHERE uuid = ?"
+        
+        cursor.execute(sql, valores)
+        conn.commit()
+        
+        print(f"✅ Registro {uuid_registro} actualizado localmente en '{table_name}'.")
+
+    except Exception as e:
+        if conn: conn.rollback()
+        print(f"🔥🔥 ERROR al actualizar el registro {uuid_registro}: {e}")
+        raise
+    finally:
+        if conn: conn.close()

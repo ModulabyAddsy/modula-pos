@@ -1,9 +1,5 @@
 # src/core/app_controller.py
 import webbrowser
-TABLE_PRIMARY_KEYS = {
-    'egresos': 'uuid',
-    # ... Añade aquí el resto de tus tablas y sus claves primarias
-}
 import os
 import uuid
 import psutil
@@ -16,9 +12,12 @@ from src.ui.main_window import MainWindow
 from src.core.api_client import ApiClient
 from src.core.local_storage import get_id_terminal, save_terminal_id, DB_DIR, get_local_db_file_info, get_pending_sync_records, mark_records_as_synced, ejecutar_migracion_sql, limpiar_datos_sucursal_anterior, get_last_sync_timestamps, apply_deltas, _get_local_max_timestamps,save_last_server_sync_timestamp
 from src.ui.dialogs import mostrar_dialogo_migracion, ResolverUbicacionDialog, SeleccionarSucursalDialog, RecuperarContrasenaDialog, NewTerminalDialog
+from src.ui.windows_dialogs.cambiar_contrasena_dialog import CambiarContrasenaDialog
+import src.core.local_storage as local_storage
 from src.ui.views.login_view import LoginView
 from src.ui.views.dashboard_view import DashboardView
 from src.core.utils import get_network_identifiers
+from src.config.schema_config import TABLE_PRIMARY_KEYS
 import time
 import shutil
 from PySide6.QtCore import QTimer
@@ -608,9 +607,8 @@ class AppController(QObject):
         
     def _handle_local_login(self, empleado_id: str, contrasena: str):
         """
-        Verifica las credenciales del usuario contra la DB de usuarios local.
+        Verifica las credenciales y orquesta el flujo de cambio de contraseña obligatorio.
         """
-        # ✅ CORRECCIÓN: Usamos el atributo de la clase.
         if not self.id_empresa_addsy:
             self.show_error("No se pudo obtener el ID de la empresa. Reinicia la aplicación.")
             return
@@ -618,7 +616,7 @@ class AppController(QObject):
         db_path = DB_DIR / self.id_empresa_addsy / "databases_generales" / "usuarios.sqlite"
         
         if not db_path.exists():
-            self.show_error("No se encontró la base de datos de usuarios local. Por favor, realiza la activación de la cuenta.")
+            self.show_error("No se encontró la base de datos de usuarios local.")
             return
             
         conn = None
@@ -630,25 +628,57 @@ class AppController(QObject):
             cursor.execute("SELECT * FROM usuarios WHERE numero_empleado = ? OR nombre_usuario = ?", (empleado_id, empleado_id))
             usuario_row = cursor.fetchone()
             
-            if usuario_row:
-                usuario_info = dict(usuario_row)
-                if bcrypt.checkpw(contrasena.encode('utf-8'), usuario_info['contrasena'].encode('utf-8')):
-                    # Las credenciales son correctas, mostramos el dashboard
+            if not usuario_row:
+                self.show_error("Número de empleado o contraseña incorrectos.")
+                return
+
+            usuario_info = dict(usuario_row)
+            if bcrypt.checkpw(contrasena.encode('utf-8'), usuario_info['contrasena'].encode('utf-8')):
+                # Si la contraseña es correcta, ahora decidimos qué hacer.
+                
+                # --- Verificamos la bandera de cambio de contraseña ---
+                if usuario_info.get('cambio_contrasena_obligatorio') == 1:
+                    dialog = CambiarContrasenaDialog(self.main_window)
+                    if dialog.exec():
+                        nueva_pass = dialog.get_nueva_contrasena()
+                        try:
+                            local_storage.actualizar_contrasena_usuario(
+                                self.id_empresa_addsy,
+                                usuario_info['uuid'],
+                                nueva_pass
+                            )
+                            print("Contraseña cambiada. Disparando sincronización...")
+                            self.sincronizar_ahora(
+                                on_finished_callback=lambda s: print(f"Sincronización de contraseña finalizada: {s}")
+                            )
+                            # Después de cambiar la contraseña exitosamente, AHORA SÍ vamos al dashboard.
+                            self.main_window.setCentralWidget(DashboardView())
+                            self.sync_timer.start(20000)
+                            print("🔄 Sincronización periódica iniciada (cada 20 segundos).")
+                            
+                        except Exception as e:
+                            self.show_error(f"No se pudo actualizar la contraseña: {e}")
+                            return # Detenemos si hay error al guardar
+
+                    else:
+                        # Si el usuario presiona "Cancelar", se le avisa y la función termina aquí.
+                        self.show_error("El cambio de contraseña es obligatorio para continuar.")
+                        return
+                else:
+                    # --- SI NO ES OBLIGATORIO CAMBIAR LA CONTRASEÑA ---
+                    # Entonces procedemos directamente al dashboard.
                     self.main_window.setCentralWidget(DashboardView())
-                    # Se ejecuta cada 20,000 milisegundos (20 segundos).
                     self.sync_timer.start(20000)
                     print("🔄 Sincronización periódica iniciada (cada 20 segundos).")
-                else:
-                    self.show_error("Número de empleado o contraseña incorrectos.")
             else:
                 self.show_error("Número de empleado o contraseña incorrectos.")
                 
         except sqlite3.Error as e:
             self.show_error(f"Error al verificar credenciales: {e}")
-            self.main_window.mostrar_vista_auth()
         finally:
             if conn:
                 conn.close()
+
           
     def _on_sync_finished(self, status):
         """
