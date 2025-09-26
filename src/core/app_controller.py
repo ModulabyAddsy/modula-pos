@@ -258,7 +258,6 @@ class AppController(QObject):
         self.sync_timer = QTimer(self)
         self.sync_timer.timeout.connect(self.sincronizar_ahora)
         
-        self.login_view = LoginView()
         self._connect_signals()
 
     def _connect_signals(self):
@@ -266,8 +265,6 @@ class AppController(QObject):
         self.main_window.auth_view.registro_solicitado.connect(self.handle_register)
         self.main_window.auth_view.recuperacion_solicitada.connect(self.handle_recovery_request)
         
-        self.login_view.login_solicitado.connect(self._handle_local_login)
-        self.login_view.recuperacion_solicitada.connect(self.handle_recovery_request)
 
     def run(self):
         self.main_window.show()
@@ -319,26 +316,28 @@ class AppController(QObject):
     def handle_startup_result(self, result, logs):
         """
         Manejador central para el resultado del worker de arranque.
-        Ahora es más directo y no muestra un diálogo de resumen.
         """
-        if isinstance(result, str) or result.get("status") == "error":
-            if result == "activacion_requerida" or result.get("message") == "Terminal no encontrada en el backend.":
+        if not isinstance(result, dict) or result.get("status") != "ok":
+            # Si el arranque falla o requiere activación, vamos a la vista de Auth.
+            if result == "activacion_requerida" or "Terminal no encontrada" in result.get("message", ""):
                 self.solicitar_login_activacion()
             else:
                 self.show_error(result.get("message", "Error desconocido en el arranque."))
                 self.main_window.mostrar_vista_auth()
-            
-            self.thread = None
-            self.worker = None
+            return
+
+        # Si el arranque es exitoso, preparamos la vista de login local.
+        self.main_window.mostrar_vista_login_local()
         
-        elif isinstance(result, dict):
-            # ✅ CAMBIO CRUCIAL: No importa qué camino tome el arranque,
-            # si todo es 'ok', siempre mostramos la vista de login local.
-            if result.get("status") == "ok":
-                self.main_window.setCentralWidget(self.login_view)
-            else:
-                # Si la verificación falla por alguna razón (suscripción, etc.), lo manejamos
-                self._manejar_respuesta_verificacion(result)
+        # Conectamos las señales de la vista de login local para que los botones funcionen.
+        try:
+            self.main_window.login_view.login_solicitado.disconnect()
+            self.main_window.login_view.recuperacion_solicitada.disconnect()
+        except RuntimeError:
+            pass  # Ignorar si no estaban conectadas
+        
+        self.main_window.login_view.login_solicitado.connect(self._handle_local_login)
+        self.main_window.login_view.recuperacion_solicitada.connect(self.handle_recovery_request)
             
     def solicitar_login_activacion(self):
         """Configura la UI para el login de activación."""
@@ -370,7 +369,7 @@ class AppController(QObject):
         if status == "ok" and "access_token" in respuesta:
             print("Verificación exitosa. Iniciando sesión automáticamente.")
             self.api_client.set_auth_token(respuesta["access_token"])
-            self.main_window.setCentralWidget(self.login_view)
+            self.main_window.mostrar_vista_login_local()
         
         # --- ¡NUEVA LÓGICA PARA SUSCRIPCIÓN VENCIDA! ---
         elif status == "subscription_expired":
@@ -652,7 +651,7 @@ class AppController(QObject):
                                 on_finished_callback=lambda s: print(f"Sincronización de contraseña finalizada: {s}")
                             )
                             # Después de cambiar la contraseña exitosamente, AHORA SÍ vamos al dashboard.
-                            self.main_window.setCentralWidget(DashboardView())
+                            self.main_window.mostrar_vista_dashboard()
                             self.sync_timer.start(20000)
                             print("🔄 Sincronización periódica iniciada (cada 20 segundos).")
                             
@@ -667,7 +666,7 @@ class AppController(QObject):
                 else:
                     # --- SI NO ES OBLIGATORIO CAMBIAR LA CONTRASEÑA ---
                     # Entonces procedemos directamente al dashboard.
-                    self.main_window.setCentralWidget(DashboardView())
+                    self.main_window.mostrar_vista_dashboard()
                     self.sync_timer.start(20000)
                     print("🔄 Sincronización periódica iniciada (cada 20 segundos).")
             else:

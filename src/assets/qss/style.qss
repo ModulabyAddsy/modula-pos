@@ -417,3 +417,183 @@ QDateEdit {
 QDateEdit:focus {
     border: 2px solid #3B82F6; /* blue-500 */
 }
+
+/* ===========================================================================
+ * Archivo de Estilos Principal para Modula
+ * Versión Depurada
+ * =========================================================================== */
+
+/* ===========================================================================
+ * SECCIONES CORREGIDAS CON EL COLOR PRINCIPAL DE MODULA
+ * =========================================================================== */
+
+/* ---------------------------------------------------------------------------
+ * 1. Estilos Globales (Ventana, Barras de Menú y Estado)
+ * --------------------------------------------------------------------------- */
+
+/* Define el estilo para la barra de menú superior y la barra de estado inferior. */
+QMenuBar, QStatusBar {
+    background-color: #3B82F6; /* Color azul principal de Modula. */
+    color: #ffffffff;          /* Texto de color blanco para máximo contraste. */
+    font-weight: 600;           /* Texto en seminegrita para mejor legibilidad. */
+}
+
+/* Define el estilo para un ítem del menú (ej. "Archivo") cuando se selecciona o se pasa el mouse. */
+QMenuBar::item:selected {
+    background-color: #5485acff; /* Un azul más oscuro para indicar selección/hover. */
+    border-radius: 4px;         /* Bordes redondeados para un look moderno. */
+}
+
+/* Define el estilo para el menú desplegable que aparece al hacer clic. */
+QMenu {
+    background-color: #fdfdfd; /* Fondo casi blanco, limpio. */
+    color: #1f2937;            /* Texto oscuro para legibilidad sobre fondo claro. */
+    border: 1px solid #ccc;    /* Borde sutil para delimitar el menú. */
+}
+
+/* Define el estilo para un ítem dentro del menú desplegable cuando se selecciona. */
+QMenu::item:selected {
+    background-color: #5485acff; /* Usa el color principal para la selección. */
+    color: white;              /* Texto blanco al seleccionar. */
+}
+
+
+/* ---------------------------------------------------------------------------
+ * 2. Estructura Principal (Paneles y Separador)
+ * --------------------------------------------------------------------------- */
+
+/* Define el estilo para el panel de navegación izquierdo. */
+#NavigationSidebar {
+    background-color: #e5e7eb; /* Fondo gris muy claro para el panel izquierdo. */
+    border: none;
+}
+
+/* Define el estilo para el contenido del panel derecho. */
+#WorkspaceContent {
+    background-color: #ffffff; /* Fondo blanco para el área de trabajo principal. */
+}
+
+/* Define el estilo para el manejador del separador horizontal. */
+QSplitter::handle:horizontal {
+    background-color: #e5e7eb; /* Color azul principal de Modula. */
+    width: 25px;                /* Un ancho visible pero no intrusivo. */
+    margin: 0px 5px;           /* Margen para ampliar el área de agarre. */
+}
+
+/* Define el estilo del separador cuando el mouse está sobre él. */
+QSplitter::handle:horizontal:hover {
+    background-color: #5485acff; /* Un azul más claro y brillante para un feedback visual claro. */
+}
+
+/* ---------------------------------------------------------------------------
+ * 3. Componentes del Sidebar de Navegación
+ * --------------------------------------------------------------------------- */
+
+#SidebarTitle {
+    color: #374151;
+    font-size: 24px;
+    font-weight: 700;
+    padding-bottom: 10px;
+}
+
+#ModuleSearchBar {
+    font-size: 13px;
+    padding: 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    background-color: white;
+}
+
+#ModuleListWidget {
+    border: none;
+    background-color: transparent;
+}
+
+#ModuleListWidget::item {
+    color: #374151;
+    border-radius: 8px;
+    padding: 12px 8px;
+    margin: 4px;
+}
+
+#ModuleListWidget::item:hover {
+    background-color: #e5e7eb;
+}
+
+#ModuleListWidget::item:selected {
+    background-color: #e0eefd; /* Un azul muy claro y suave. */
+    color: #005a9e;            /* Texto azul oscuro para legibilidad. */
+    border-left: 3px solid #0078d4; /* Un indicador visual fuerte pero elegante. */
+}
+
+/* ---------------------------------------------------------------------------
+ * 4. Componentes Específicos del Workspace (Diseño "Atlas")
+ * --------------------------------------------------------------------------- */
+
+/* Barra superior de acciones dentro del workspace */
+#TopModuleBar {
+    background-color: #f3f4f6;
+    border-bottom: 1px solid #d1d5db;
+}
+
+#TopModuleBar QPushButton {
+    background-color: transparent;
+    border: none;
+    padding: 8px;
+    font-weight: 600;
+    font-size: 13px;
+    color: #4b5563;
+}
+
+#TopModuleBar QPushButton:hover {
+    background-color: #e5e7eb;
+    border-radius: 6px;
+}
+
+/* Pestañas (Tabs) dentro del workspace */
+#Workspace QTabBar::tab {
+    background: #f3f4f6;
+    padding: 10px 15px;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+#Workspace QTabBar::tab:selected {
+    background: #ffffff;
+    border-bottom: 1px solid #ffffff;
+}
+
+/* Etiqueta de bienvenida */
+#WelcomeLabel {
+    font-size: 22px;
+    color: #9ca3af;
+}
+
+/* ---------------------------------------------------------------------------
+ * 5. Estilos Genéricos (Scrollbar)
+ * --------------------------------------------------------------------------- */
+
+QScrollBar:vertical, QScrollBar:horizontal {
+    border: none;
+    background: #f1f1f1;
+    width: 10px;
+    height: 10px;
+    margin: 0px;
+}
+
+QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
+    background: #c1c1c1;
+    min-height: 20px;
+    min-width: 20px;
+    border-radius: 5px;
+}
+
+QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover {
+    background: #a8a8a8;
+}
+
+QScrollBar::add-line, QScrollBar::sub-line {
+    height: 0px;
+    width: 0px;
+}
