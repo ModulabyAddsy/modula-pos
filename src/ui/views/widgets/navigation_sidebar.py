@@ -2,22 +2,19 @@
 
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLineEdit, QListWidget, QListWidgetItem
 from PySide6.QtGui import QIcon
-from PySide6.QtCore import Qt, QSize,  Signal
-from src.core.utils import resource_path
+from PySide6.QtCore import Qt, QSize, Signal
+from pathlib import Path
 
 class NavigationSidebar(QWidget):
-    """
-    Panel de navegación que ahora distingue entre un solo clic y un doble clic.
-    """
-    modulo_click_sencillo = Signal(str)
-    modulo_doble_click = Signal(str)
+    # --- MODIFICADO: Las señales ahora emiten un diccionario (el manifest) ---
+    modulo_click_sencillo = Signal(dict)
+    modulo_doble_click = Signal(dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("NavigationSidebar")
-
+        # ... (el resto de la configuración inicial no cambia) ...
         layout = QVBoxLayout(self)
-        # --- CORRECCIÓN sutil en márgenes para consistencia ---
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(15)
 
@@ -31,46 +28,40 @@ class NavigationSidebar(QWidget):
         self.module_list.setSpacing(5)
         self.module_list.setIconSize(QSize(20, 20))
         
-        # Conectamos las señales a las funciones que AHORA SÍ existen
         self.module_list.itemClicked.connect(self._on_module_single_clicked)
         self.module_list.itemDoubleClicked.connect(self._on_module_double_clicked)
         
         layout.addWidget(self.search_bar)
         layout.addWidget(self.module_list)
-        
-        self._add_dummy_modules()
 
-    
     def _on_module_single_clicked(self, item):
-        """Emite la señal para un solo clic."""
-        self.modulo_click_sencillo.emit(item.text())
+        """Emite el manifest completo del módulo con un solo clic."""
+        manifest = item.data(Qt.UserRole)
+        if manifest:
+            self.modulo_click_sencillo.emit(manifest)
 
-    # --- FUNCIÓN AÑADIDA ---
     def _on_module_double_clicked(self, item):
-        """Emite la señal para un doble clic."""
-        self.modulo_doble_click.emit(item.text())
+        """Emite el manifest completo del módulo con un doble clic."""
+        manifest = item.data(Qt.UserRole)
+        if manifest:
+            self.modulo_doble_click.emit(manifest)
         
-    def _add_dummy_modules(self):
-        """Carga módulos de ejemplo en la lista."""
-        modules = [
-            {"name": "Punto de Venta", "icon": "assets/icons/shopping-cart.svg"},
-            {"name": "Inventario", "icon": "assets/icons/archive.svg"},
-            {"name": "Clientes", "icon": "assets/icons/users.svg"},
-            {"name": "Reportes", "icon": "assets/icons/bar-chart-2.svg"},
-            {"name": "Configuración", "icon": "assets/icons/settings.svg"}
-        ]
-
-        for module in modules:
-            item = QListWidgetItem(module["name"])
-            icon_path = resource_path(module["icon"])
-            item.setIcon(QIcon(icon_path))
+    def populate_modules(self, modules_list: list, modules_dir: Path):
+        """
+        NUEVA FUNCIÓN: Limpia la lista y la llena con los módulos instalados.
+        """
+        self.module_list.clear()
+        for manifest in modules_list:
+            item = QListWidgetItem(manifest['nombre'])
+            # Guardamos el manifest completo en el item para usarlo después
+            item.setData(Qt.UserRole, manifest)
             
-            # --- MODIFICADO: Eliminamos el centrado de texto ---
-            # El alineamiento por defecto (izquierda) es el que queremos
-            
+            icon_path = modules_dir / manifest['id'] / manifest['icono']
+            if icon_path.exists():
+                item.setIcon(QIcon(str(icon_path)))
+                
             self.module_list.addItem(item)
-            
-        self.module_list.setCurrentRow(0)
+
 
     def _filter_modules(self, text):
         """Filtra los módulos en la lista según el texto de búsqueda."""

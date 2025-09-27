@@ -21,6 +21,7 @@ from src.config.schema_config import TABLE_PRIMARY_KEYS
 import time
 import shutil
 from PySide6.QtCore import QTimer
+from .module_manager import ModuleManager
 
 class StartupWorker(QObject):
     """
@@ -232,14 +233,29 @@ class SyncWorker(QObject):
             traceback.print_exc()
             self.finished.emit(str(e))
 
+class ModuleUpdateWorker(QObject):
+    """Ejecuta la revisión de módulos en un hilo secundario."""
+    finished = Signal(list) # Emitirá la lista de módulos instalados al terminar
+
+    def __init__(self, module_manager):
+        super().__init__()
+        self.module_manager = module_manager
+
+    def run(self):
+        """El trabajo pesado: buscar actualizaciones y obtener la lista final."""
+        self.module_manager.check_for_updates()
+        installed_modules = self.module_manager.get_installed_modules()
+        self.finished.emit(installed_modules)
+
 class AppController(QObject):
     """Controla todo el flujo de la aplicación."""
     def __init__(self, app):
         super().__init__()
+        self.main_window = MainWindow(self) 
         self.app = app
         self.api_client = ApiClient()
-        self.main_window = MainWindow()
-
+        self.module_manager = ModuleManager(self.api_client, self)
+        
         # Atributos únicos para CADA tarea asíncrona
         self.startup_thread = None
         self.startup_worker = None
@@ -247,6 +263,8 @@ class AppController(QObject):
         self.auth_worker = None
         self.sync_thread = None  # Dedicado EXCLUSIVAMENTE a la sincronización
         self.sync_worker = None
+        self.module_update_thread = None
+        self.module_update_worker = None
         
         self.respuesta_conflicto = None
         self.claim_token = None
@@ -651,6 +669,7 @@ class AppController(QObject):
                                 on_finished_callback=lambda s: print(f"Sincronización de contraseña finalizada: {s}")
                             )
                             # Después de cambiar la contraseña exitosamente, AHORA SÍ vamos al dashboard.
+                            self._start_module_update_check()
                             self.main_window.mostrar_vista_dashboard()
                             self.sync_timer.start(20000)
                             print("🔄 Sincronización periódica iniciada (cada 20 segundos).")
@@ -666,6 +685,7 @@ class AppController(QObject):
                 else:
                     # --- SI NO ES OBLIGATORIO CAMBIAR LA CONTRASEÑA ---
                     # Entonces procedemos directamente al dashboard.
+                    self._start_module_update_check()
                     self.main_window.mostrar_vista_dashboard()
                     self.sync_timer.start(20000)
                     print("🔄 Sincronización periódica iniciada (cada 20 segundos).")
@@ -678,6 +698,31 @@ class AppController(QObject):
             if conn:
                 conn.close()
 
+    def _start_module_update_check(self):
+        """Inicia la revisión y carga de módulos en un hilo secundario."""
+        self.module_update_thread = QThread()
+        self.module_update_worker = ModuleUpdateWorker(self.module_manager)
+        self.module_update_worker.moveToThread(self.module_update_thread)
+
+        self.module_update_thread.started.connect(self.module_update_worker.run)
+        self.module_update_worker.finished.connect(self._on_module_update_finished)
+        
+        # Auto-limpieza del hilo y el worker
+        self.module_update_worker.finished.connect(self.module_update_thread.quit)
+        self.module_update_worker.finished.connect(self.module_update_worker.deleteLater)
+        self.module_update_thread.finished.connect(self.module_update_thread.deleteLater)
+        
+        self.module_update_thread.start()
+
+    def _on_module_update_finished(self, installed_modules: list):
+        """
+        Se ejecuta cuando el worker termina. Recibe la lista de módulos
+        y se la pasa a la UI para que se muestre en el sidebar.
+        """
+        print(f"✅ Carga de módulos completada. {len(installed_modules)} módulos encontrados.")
+        # Le pasamos la lista de manifiestos a la barra lateral
+        sidebar = self.main_window.dashboard_view.nav_sidebar
+        sidebar.populate_modules(installed_modules)
           
     def _on_sync_finished(self, status):
         """

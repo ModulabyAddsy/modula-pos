@@ -6,9 +6,10 @@ from src.ui.views.widgets.navigation_sidebar import NavigationSidebar
 from src.ui.views.widgets.workspace_view import WorkspaceView
 
 class DashboardView(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, app_controller, parent=None):
         super().__init__(parent)
         self.setObjectName("ModulaProDashboard")
+        self.app_controller = app_controller
         
         # --- LÍNEA CLAVE RE-AÑADIDA ---
         # Fuerza al widget a que SIEMPRE pinte el fondo definido en la hoja de estilos.
@@ -26,8 +27,8 @@ class DashboardView(QWidget):
         splitter.addWidget(self.workspace)
 
         # Conectamos las dos señales para la nueva lógica de clic/doble clic
-        self.nav_sidebar.modulo_click_sencillo.connect(self.workspace.reemplazar_pestaña_actual)
-        self.nav_sidebar.modulo_doble_click.connect(self.workspace.abrir_nuevo_modulo)
+        self.nav_sidebar.modulo_click_sencillo.connect(self._handle_single_click)
+        self.nav_sidebar.modulo_doble_click.connect(self._handle_double_click)
         
         # Configuración del tamaño y comportamiento del splitter
         splitter.setSizes([240, 840]) 

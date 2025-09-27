@@ -103,72 +103,43 @@ class WorkspaceView(QWidget):
             # Si no hay pestañas seleccionadas, mostramos el placeholder (índice 0)
             self.content_stack.setCurrentIndex(0)
 
-    def reemplazar_pestaña_actual(self, nombre_modulo: str):
+    def reemplazar_pestaña_actual(self, nombre_modulo: str, widget_modulo: QWidget):
         """
-        Maneja el clic sencillo: reemplaza el Dashboard o enfoca una pestaña existente.
+        MODIFICADO: Ahora recibe el widget del módulo ya creado.
         """
-        # 1. Buscamos si el módulo ya está abierto en OTRA pestaña.
-        for i in range(self.tab_bar.count()):
-            if self.tab_bar.tabText(i) == nombre_modulo:
-                self.tab_bar.setCurrentIndex(i)
-                return
-
-        # 2. Si no está abierto, verificamos la pestaña actual.
         current_index = self.tab_bar.currentIndex()
-        
-        # Si no hay ninguna pestaña seleccionada (vista vacía), abrimos una nueva.
         if current_index == -1:
-            self.abrir_nuevo_modulo(nombre_modulo)
+            self.abrir_nuevo_modulo(nombre_modulo, widget_modulo)
             return
             
-        # 3. Si la pestaña actual es un "Dashboard", la reemplazamos.
         if self.tab_bar.tabText(current_index) == "Dashboard":
-            # Creamos el nuevo contenido
-            nuevo_widget = self._crear_modulo_widget(nombre_modulo)
+            widget_a_reemplazar = self.content_stack.widget(current_index + 1)
+            self.content_stack.removeWidget(widget_a_reemplazar)
+            widget_a_reemplazar.deleteLater()
             
-            # Obtenemos el widget viejo para borrarlo
-            self.content_stack.insertWidget(current_index, nuevo_widget)
-            
-            # Lo quitamos del stack y lo borramos de memoria
-            #self.content_stack.removeWidget(widget_a_reemplazar)
-            #widget_a_reemplazar.deleteLater()
-            
-            # Insertamos el nuevo widget en la misma posición
-            self.content_stack.insertWidget(current_index + 1, nuevo_widget)
-            
-            # Actualizamos el texto de la pestaña y la seleccionamos
+            self.content_stack.insertWidget(current_index + 1, widget_modulo)
             self.tab_bar.setTabText(current_index, nombre_modulo)
             self.tab_bar.setCurrentIndex(current_index)
 
 
-    def abrir_nuevo_modulo(self, nombre_modulo: str):
-        """Maneja el doble clic, siempre abre una nueva pestaña."""
-        # Si ya está abierto (y no es Dashboard), lo seleccionamos.
+    def abrir_nuevo_modulo(self, nombre_modulo: str, widget_modulo: QWidget = None):
+        """
+        MODIFICADO: Ahora recibe el widget del módulo. Si no lo recibe, crea un placeholder.
+        """
         if nombre_modulo != "Dashboard":
             for i in range(self.tab_bar.count()):
                 if self.tab_bar.tabText(i) == nombre_modulo:
                     self.tab_bar.setCurrentIndex(i)
                     return
 
-        # Si la vista está vacía, quitamos el placeholder del stack.
-        # Creamos el contenido del nuevo módulo
-        nuevo_modulo_widget = QWidget()
-        nuevo_modulo_widget.setObjectName("WorkspaceContent")
-        layout = QVBoxLayout(nuevo_modulo_widget)
-        layout.setAlignment(Qt.AlignCenter)
+        if self.tab_bar.count() == 0:
+            if self.content_stack.indexOf(self.placeholder_widget) != -1:
+                self.content_stack.removeWidget(self.placeholder_widget)
+
+        # Si no nos pasan un widget, creamos uno de bienvenida (para el Dashboard)
+        if not widget_modulo:
+             widget_modulo = self._crear_modulo_widget(nombre_modulo)
         
-        label_text = f"Contenido del Módulo: {nombre_modulo}"
-        if nombre_modulo == "Dashboard":
-             label_text = "Bienvenido a Modula"
-        
-        label = QLabel(label_text)
-        label.setStyleSheet("font-size: 24px;")
-        layout.addWidget(label)
-        
-        # Añadimos la pestaña y el widget de contenido
         index = self.tab_bar.addTab(nombre_modulo)
-        self.content_stack.addWidget(nuevo_modulo_widget)
-        
-        # Sincronizamos la selección
+        self.content_stack.addWidget(widget_modulo)
         self.tab_bar.setCurrentIndex(index)
-        self.content_stack.setCurrentWidget(nuevo_modulo_widget)

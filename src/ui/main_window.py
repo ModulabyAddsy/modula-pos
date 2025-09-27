@@ -9,8 +9,9 @@ from src.ui.views.loading_view import LoadingView
 from src.ui.views.login_view import LoginView
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, app_controller):
         super().__init__()
+        self.dashboard_view = DashboardView(app_controller)
         self.setWindowTitle("Modula POS")
         self.setObjectName("MainWindow")
         icon = QIcon(":/images/logo_modula.ico")
