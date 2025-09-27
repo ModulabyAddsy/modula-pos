@@ -1,6 +1,7 @@
 <!DOCTYPE RCC>
 <RCC version="1.0">
 <qresource prefix="/">
+    <file>src/assets/qss/style.qss</file>
     <file alias="images/logo_modula.png">src/assets/images/logo_modula.png</file>
     <file alias="images/logo_modula.ico">src/assets/images/logo_modula.ico</file>
     <file alias="images/logo_addsy.png">src/assets/images/logo_addsy.png</file>
