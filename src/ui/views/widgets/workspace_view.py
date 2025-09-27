@@ -105,21 +105,42 @@ class WorkspaceView(QWidget):
 
     def reemplazar_pestaña_actual(self, nombre_modulo: str, widget_modulo: QWidget):
         """
-        MODIFICADO: Ahora recibe el widget del módulo ya creado.
+        Maneja el clic sencillo: reemplaza el Dashboard o enfoca una pestaña existente.
         """
+        # 1. Buscamos si el módulo ya está abierto en OTRA pestaña.
+        for i in range(self.tab_bar.count()):
+            if self.tab_bar.tabText(i) == nombre_modulo:
+                self.tab_bar.setCurrentIndex(i)
+                return
+
+        # 2. Si no está abierto, verificamos la pestaña actual.
         current_index = self.tab_bar.currentIndex()
+        
         if current_index == -1:
             self.abrir_nuevo_modulo(nombre_modulo, widget_modulo)
             return
             
+        # 3. Si la pestaña actual es un "Dashboard", la reemplazamos.
         if self.tab_bar.tabText(current_index) == "Dashboard":
-            widget_a_reemplazar = self.content_stack.widget(current_index + 1)
-            self.content_stack.removeWidget(widget_a_reemplazar)
-            widget_a_reemplazar.deleteLater()
+            # --- LÓGICA CORREGIDA Y MÁS SEGURA ---
             
-            self.content_stack.insertWidget(current_index + 1, widget_modulo)
+            # El índice del widget en el stack es el de la pestaña + 1
+            widget_index_a_reemplazar = current_index + 1
+
+            # Verificamos que el widget exista en esa posición antes de intentar borrarlo
+            if widget_index_a_reemplazar < self.content_stack.count():
+                widget_a_reemplazar = self.content_stack.widget(widget_index_a_reemplazar)
+                self.content_stack.removeWidget(widget_a_reemplazar)
+                widget_a_reemplazar.deleteLater()
+            
+            # Insertamos el nuevo widget en la misma posición del stack
+            self.content_stack.insertWidget(widget_index_a_reemplazar, widget_modulo)
+            
+            # Actualizamos el texto de la pestaña y la seleccionamos
             self.tab_bar.setTabText(current_index, nombre_modulo)
-            self.tab_bar.setCurrentIndex(current_index)
+            self.tab_bar.setCurrentIndex(current_index) # Esto activará la sincronización
+            
+            self.content_stack.setCurrentWidget(widget_modulo)
 
 
     def abrir_nuevo_modulo(self, nombre_modulo: str, widget_modulo: QWidget = None):

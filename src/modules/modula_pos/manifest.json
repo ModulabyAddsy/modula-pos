@@ -1,5 +1,5 @@
 {
-  "id": "modula_pos",
+  "id": "modula_ventas",
   "nombre": "Punto de Venta",
   "version": "1.0.0",
   "descripcion": "Módulo principal para realizar ventas y gestionar transacciones.",

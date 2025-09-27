@@ -39,3 +39,24 @@ class DashboardView(QWidget):
         
         main_layout.addWidget(splitter)
         self.setLayout(main_layout)
+        
+        # --- NUEVAS FUNCIONES MANEJADORAS ---
+    def _handle_single_click(self, manifest: dict):
+        """
+        Manejador para el clic sencillo. Carga el widget y se lo pasa
+        a la función de reemplazo de pestaña del workspace.
+        """
+        # Usamos el ModuleManager (a través del app_controller) para cargar el widget
+        widget = self.app_controller.module_manager.load_module_widget(manifest)
+        if widget:
+            self.workspace.reemplazar_pestaña_actual(manifest['nombre'], widget)
+
+    def _handle_double_click(self, manifest: dict):
+        """
+        Manejador para el doble clic. Carga el widget y se lo pasa
+        a la función de abrir nueva pestaña del workspace.
+        """
+        # Usamos el ModuleManager para cargar el widget
+        widget = self.app_controller.module_manager.load_module_widget(manifest)
+        if widget:
+            self.workspace.abrir_nuevo_modulo(manifest['nombre'], widget)

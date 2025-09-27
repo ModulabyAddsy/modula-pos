@@ -15,6 +15,44 @@ class ApiClient:
         if not self.base_url:
             raise ValueError("La URL del API no está configurada. Revisa tu archivo .env")
         self.auth_token = None
+    
+    def _get_auth_headers(self):
+        """Crea el diccionario de cabeceras para una petición autenticada."""
+        if not self.auth_token:
+            raise Exception("No se ha establecido un token de autenticación.")
+        return {"Authorization": f"Bearer {self.auth_token}"}
+    
+    def _request(self, method: str, endpoint: str, json_data: dict = None):
+        """
+        Función auxiliar genérica para realizar peticiones a la API.
+        Añade automáticamente la URL base y el token de autorización.
+        """
+        if not self.base_url or not self.auth_token: # <--- LÍNEA CORREGIDA
+            raise Exception("ApiClient no inicializado o sin token.")
+
+        url = f"{self.base_url}/{endpoint}"
+        headers = self._get_auth_headers()
+
+        try:
+            # Usamos un bloque 'with' para asegurar que el cliente se cierre
+            with httpx.Client() as client:
+                response = client.request(
+                    method.upper(),
+                    url,
+                    json=json_data,
+                    headers=headers,
+                    timeout=30.0 # Timeout de 30 segundos
+                )
+                # Lanza una excepción si la respuesta es un error (4xx o 5xx)
+                response.raise_for_status()
+                return response.json()
+        except httpx.HTTPStatusError as e:
+            print(f"🔥🔥 Error HTTP: {e.response.status_code} - {e.response.text}")
+            # Re-lanzamos la excepción para que sea capturada por el ModuleManager
+            raise e
+        except Exception as e:
+            print(f"🔥🔥 Error de red o conexión: {e}")
+            raise e
         
     def _sanitize_data_for_json(self, data):
         """
@@ -440,3 +478,11 @@ class ApiClient:
             return response.json()
         except Exception as e:
             raise Exception(f"Error al obtener deltas: {e}")
+        
+    def get_modules_manifest(self):
+        """
+        Obtiene el manifiesto de módulos desde el backend.
+        """
+        print("ℹ️ Solicitando manifiesto de módulos al servidor...")
+        # Añadimos el prefijo /api/v1/ para que coincida con la ruta del backend
+        return self._request("get", "api/v1/modules/manifest")

@@ -22,6 +22,7 @@ import time
 import shutil
 from PySide6.QtCore import QTimer
 from .module_manager import ModuleManager
+from .module_manager import MODULES_DIR 
 
 class StartupWorker(QObject):
     """
@@ -345,6 +346,7 @@ class AppController(QObject):
             return
 
         # Si el arranque es exitoso, preparamos la vista de login local.
+        self._start_module_update_check()
         self.main_window.mostrar_vista_login_local()
         
         # Conectamos las señales de la vista de login local para que los botones funcionen.
@@ -359,8 +361,11 @@ class AppController(QObject):
             
     def solicitar_login_activacion(self):
         """Configura la UI para el login de activación."""
-        try: self.main_window.auth_view.login_solicitado.disconnect()
-        except RuntimeError: pass
+        try:
+            self.main_window.login_view.login_solicitado.disconnect()
+        except RuntimeError:
+            pass # Ignora el error si las señales no estaban conectadas
+        
         self.main_window.auth_view.login_solicitado.connect(self.handle_account_login_and_activate)
         self.main_window.mostrar_vista_auth()
 
@@ -387,6 +392,7 @@ class AppController(QObject):
         if status == "ok" and "access_token" in respuesta:
             print("Verificación exitosa. Iniciando sesión automáticamente.")
             self.api_client.set_auth_token(respuesta["access_token"])
+            self._start_module_update_check()
             self.main_window.mostrar_vista_login_local()
         
         # --- ¡NUEVA LÓGICA PARA SUSCRIPCIÓN VENCIDA! ---
@@ -412,8 +418,10 @@ class AppController(QObject):
             self.respuesta_conflicto = respuesta
             
             # Desconectamos cualquier conexión anterior para evitar duplicados
-            try: self.main_window.auth_view.login_solicitado.disconnect()
-            except RuntimeError: pass
+        try:
+            self.main_window.login_view.login_solicitado.disconnect()
+        except RuntimeError:
+            pass # Ignora el error si las señales no estaban conectadas
 
             self.main_window.auth_view.login_solicitado.connect(self.handle_login_para_resolver_conflicto)
             self.main_window.mostrar_vista_auth()
@@ -669,7 +677,6 @@ class AppController(QObject):
                                 on_finished_callback=lambda s: print(f"Sincronización de contraseña finalizada: {s}")
                             )
                             # Después de cambiar la contraseña exitosamente, AHORA SÍ vamos al dashboard.
-                            self._start_module_update_check()
                             self.main_window.mostrar_vista_dashboard()
                             self.sync_timer.start(20000)
                             print("🔄 Sincronización periódica iniciada (cada 20 segundos).")
@@ -685,7 +692,6 @@ class AppController(QObject):
                 else:
                     # --- SI NO ES OBLIGATORIO CAMBIAR LA CONTRASEÑA ---
                     # Entonces procedemos directamente al dashboard.
-                    self._start_module_update_check()
                     self.main_window.mostrar_vista_dashboard()
                     self.sync_timer.start(20000)
                     print("🔄 Sincronización periódica iniciada (cada 20 segundos).")
@@ -722,7 +728,7 @@ class AppController(QObject):
         print(f"✅ Carga de módulos completada. {len(installed_modules)} módulos encontrados.")
         # Le pasamos la lista de manifiestos a la barra lateral
         sidebar = self.main_window.dashboard_view.nav_sidebar
-        sidebar.populate_modules(installed_modules)
+        sidebar.populate_modules(installed_modules, MODULES_DIR)
           
     def _on_sync_finished(self, status):
         """

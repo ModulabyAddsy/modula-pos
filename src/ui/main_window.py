@@ -25,7 +25,7 @@ class MainWindow(QMainWindow):
 
         self.loading_view = LoadingView()
         self.auth_view = AuthView()
-        self.dashboard_view = DashboardView()
+        self.dashboard_view = DashboardView(app_controller)
         self.login_view = LoginView()
 
         self.stacked_widget.addWidget(self.loading_view)
