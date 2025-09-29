@@ -30,7 +30,7 @@ class StartupWorker(QObject):
     y ejecuta el primer ciclo de sincronización delta antes de mostrar el login.
     """
     progress = Signal(str, int)
-    finished = Signal(object, list)
+    finished = Signal(object, list, list)
 
     def __init__(self, controller_ref):
         super().__init__()
@@ -113,15 +113,22 @@ class StartupWorker(QObject):
 
             # CLEANUP: Marcamos los registros que se subieron como sincronizados.
             mark_records_as_synced(id_empresa)
+            
+                    # === NUEVA FASE: ACTUALIZACIÓN DE MÓDULOS ===
+            self.progress.emit("Revisando módulos...", 90)
+            self.controller.module_manager.check_for_updates()
+            installed_modules = self.controller.module_manager.get_installed_modules()
+            self.progress.emit("Módulos actualizados.", 95)
 
-            # === FASE 4: FINALIZACIÓN ===
+            # === FASE FINAL: FINALIZACIÓN ===
             self.progress.emit("¡Arranque completado!", 100)
-            self.finished.emit(self.response, ["Arranque y sincronización inicial completados."])
+            # Emitimos el resultado, los logs Y la lista de módulos
+            self.finished.emit(self.response, ["Arranque y sincronización inicial completados."], installed_modules)
 
         except Exception as e:
             import traceback
             traceback.print_exc()
-            self.finished.emit({"status": "error", "message": f"Error crítico en el arranque: {e}"}, [])
+            self.finished.emit({"status": "error", "message": f"Error crítico en el arranque: {e}"}, [], [])
             
 class RegisterWorker(QObject):
     """Ejecuta el proceso de registro en un hilo secundario."""
@@ -233,21 +240,7 @@ class SyncWorker(QObject):
             import traceback
             traceback.print_exc()
             self.finished.emit(str(e))
-
-class ModuleUpdateWorker(QObject):
-    """Ejecuta la revisión de módulos en un hilo secundario."""
-    finished = Signal(list) # Emitirá la lista de módulos instalados al terminar
-
-    def __init__(self, module_manager):
-        super().__init__()
-        self.module_manager = module_manager
-
-    def run(self):
-        """El trabajo pesado: buscar actualizaciones y obtener la lista final."""
-        self.module_manager.check_for_updates()
-        installed_modules = self.module_manager.get_installed_modules()
-        self.finished.emit(installed_modules)
-
+            
 class AppController(QObject):
     """Controla todo el flujo de la aplicación."""
     def __init__(self, app):
@@ -332,7 +325,7 @@ class AppController(QObject):
                 print("El backend no reconoce este hardware. Es una terminal nueva.")
                 return "activacion_requerida"
 
-    def handle_startup_result(self, result, logs):
+    def handle_startup_result(self, result, logs, installed_modules):
         """
         Manejador central para el resultado del worker de arranque.
         """
@@ -344,9 +337,16 @@ class AppController(QObject):
                 self.show_error(result.get("message", "Error desconocido en el arranque."))
                 self.main_window.mostrar_vista_auth()
             return
+        
+                # --- LÓGICA DE MÓDULOS MOVIDA AQUÍ ---
+        # poblamos la barra lateral con los módulos que encontró el worker.
+        print(f"✅ Carga de módulos completada. {len(installed_modules)} módulos encontrados.")
+        sidebar = self.main_window.dashboard_view.nav_sidebar
+        sidebar.populate_modules(installed_modules, MODULES_DIR)
+        # ------------------------------------
+
 
         # Si el arranque es exitoso, preparamos la vista de login local.
-        self._start_module_update_check()
         self.main_window.mostrar_vista_login_local()
         
         # Conectamos las señales de la vista de login local para que los botones funcionen.
@@ -392,7 +392,6 @@ class AppController(QObject):
         if status == "ok" and "access_token" in respuesta:
             print("Verificación exitosa. Iniciando sesión automáticamente.")
             self.api_client.set_auth_token(respuesta["access_token"])
-            self._start_module_update_check()
             self.main_window.mostrar_vista_login_local()
         
         # --- ¡NUEVA LÓGICA PARA SUSCRIPCIÓN VENCIDA! ---
@@ -704,32 +703,6 @@ class AppController(QObject):
             if conn:
                 conn.close()
 
-    def _start_module_update_check(self):
-        """Inicia la revisión y carga de módulos en un hilo secundario."""
-        self.module_update_thread = QThread()
-        self.module_update_worker = ModuleUpdateWorker(self.module_manager)
-        self.module_update_worker.moveToThread(self.module_update_thread)
-
-        self.module_update_thread.started.connect(self.module_update_worker.run)
-        self.module_update_worker.finished.connect(self._on_module_update_finished)
-        
-        # Auto-limpieza del hilo y el worker
-        self.module_update_worker.finished.connect(self.module_update_thread.quit)
-        self.module_update_worker.finished.connect(self.module_update_worker.deleteLater)
-        self.module_update_thread.finished.connect(self.module_update_thread.deleteLater)
-        
-        self.module_update_thread.start()
-
-    def _on_module_update_finished(self, installed_modules: list):
-        """
-        Se ejecuta cuando el worker termina. Recibe la lista de módulos
-        y se la pasa a la UI para que se muestre en el sidebar.
-        """
-        print(f"✅ Carga de módulos completada. {len(installed_modules)} módulos encontrados.")
-        # Le pasamos la lista de manifiestos a la barra lateral
-        sidebar = self.main_window.dashboard_view.nav_sidebar
-        sidebar.populate_modules(installed_modules, MODULES_DIR)
-          
     def _on_sync_finished(self, status):
         """
         Esta función ahora se ejecuta en el HILO PRINCIPAL.
