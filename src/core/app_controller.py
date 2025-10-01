@@ -55,7 +55,7 @@ class StartupWorker(QObject):
                     save_terminal_id(hardware_id)
             
             if self.response.get("status") != "ok":
-                self.finished.emit(self.response, [])
+                self.finished.emit(self.response, [], []) 
                 return
             
             self.api_client.set_auth_token(self.response["access_token"])
@@ -133,7 +133,7 @@ class StartupWorker(QObject):
 class RegisterWorker(QObject):
     """Ejecuta el proceso de registro en un hilo secundario."""
     finished = Signal(dict)
-    progress = Signal(str, int) # <-- ¡SEÑAL AÑADIDA!
+    progress = Signal(str, int)
 
     def __init__(self, controller_ref, user_data: dict):
         super().__init__()
@@ -144,7 +144,7 @@ class RegisterWorker(QObject):
     def run(self):
         """El trabajo pesado que se ejecuta en el hilo secundario."""
         try:
-            self.progress.emit("Registrando cuenta...", 10) # <-- La primera emisión
+            self.progress.emit("Registrando cuenta...", 10)
             hardware_id = self.controller._generar_id_estable()
             self.user_data["id_terminal"] = hardware_id
             
@@ -153,7 +153,11 @@ class RegisterWorker(QObject):
             
             respuesta = self.api_client.registrar_cuenta(self.user_data)
             self.finished.emit(respuesta)
+
+        # --- 👇 ESTE BLOQUE AHORA ES MÁS SIMPLE Y CORRECTO ---
         except Exception as e:
+            # Simplemente tomamos el mensaje de error que el ApiClient ya preparó
+            # y se lo pasamos al hilo principal.
             self.finished.emit({"error": str(e)})
         
 class LoginWorker(QObject):

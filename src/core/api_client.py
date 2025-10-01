@@ -86,25 +86,30 @@ class ApiClient:
                 response = client.post(url, json=datos_registro, timeout=15.0)
             response.raise_for_status()
             return response.json()
+
         except httpx.HTTPStatusError as e:
-            detail = e.response.json().get("detail", "Error desconocido del servidor.")
+            # --- 👇 ESTE BLOQUE AHORA ES MÁS ROBUSTO ---
+            detail = ""
+            try:
+                # Intenta leer el mensaje de error específico del JSON
+                detail = e.response.json().get("detail", "Error del servidor.")
+            except Exception:
+                # Si la respuesta de error no es JSON, usa el texto plano o un mensaje genérico
+                detail = e.response.text if e.response.text else "El servidor devolvió un error inesperado."
+            
             raise Exception(f"Error al registrar cuenta: {detail}")
+            # --- ------------------------------------ ---
+            
         except httpx.RequestError:
             raise Exception("Error de conexión al intentar registrar la cuenta.")
 
     def login(self, correo: str, contrasena: str) -> dict:
         """Envía las credenciales para iniciar sesión y guarda el token si es exitoso."""
         url = f"{self.base_url}/api/v1/auth/login"
-        
-        # --- CORRECCIÓN AQUÍ ---
-        # El backend espera un JSON con las claves "correo" y "contrasena",
-        # no un formulario con "username" y "password".
         payload = {"correo": correo, "contrasena": contrasena}
         
         try:
             with httpx.Client() as client:
-                # Se cambia `data=payload` por `json=payload`.
-                # Esto envía los datos como un objeto JSON con la cabecera correcta.
                 response = client.post(url, json=payload, timeout=10.0)
 
             response.raise_for_status()
@@ -112,9 +117,18 @@ class ApiClient:
             if "access_token" in data:
                 self.set_auth_token(data["access_token"])
             return data
+
         except httpx.HTTPStatusError as e:
-            detail = e.response.json().get("detail", e.response.text)
+            # --- 👇 APLICAMOS LA MISMA LÓGICA ROBUSTA AQUÍ ---
+            detail = ""
+            try:
+                detail = e.response.json().get("detail", "Error del servidor.")
+            except Exception:
+                detail = e.response.text if e.response.text else "Correo o contraseña incorrectos."
+
             raise Exception(f"Error de autenticación: {detail}") from e
+            # --- ------------------------------------------- ---
+            
         except httpx.RequestError as e:
             raise Exception("Error de conexión: No se pudo conectar al servidor.") from e
         
@@ -150,14 +164,14 @@ class ApiClient:
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:
-            # CORRECCIÓN: Si hay un error HTTP, intentamos leer el JSON,
-            # pero si falla, devolvemos un error genérico.
+            # --- 👇 APLICAMOS LA MISMA LÓGICA ROBUSTA AQUÍ ---
             try:
-                # El backend de FastAPI suele devolver un JSON con un campo "detail"
+                # Intenta leer el JSON de la respuesta de error (ej. {"detail": "Not Found"})
                 return e.response.json()
             except Exception:
-                # Si la respuesta no es JSON (ej. un error 500), creamos un diccionario de error
+                # Si la respuesta no es JSON (ej. un 500), creamos un diccionario de error
                 return {"status": "error", "message": f"Error del servidor (código {e.response.status_code})"}
+                
         except httpx.RequestError:
             return {"status": "error", "message": "No se pudo conectar con el servidor."}
 
