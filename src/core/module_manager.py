@@ -68,25 +68,51 @@ class ModuleManager:
             
     def get_installed_modules(self):
         """
-        Escanea el directorio de módulos y devuelve una lista con los manifiestos
-        de todos los módulos válidos que están instalados.
+        Escanea, valida y devuelve una lista con los manifiestos de todos los
+        módulos válidos que el usuario actual tiene permiso para ver.
         """
         installed = []
-        # Usamos la constante MODULES_DIR que ya está definida en el archivo
         if not MODULES_DIR.is_dir():
+            print("⚠️ El directorio de módulos no existe. No se cargarán módulos.")
             return []
 
+        # --- LÓGICA DE PERMISOS ---
+        # En una implementación real, esta línea vendría de un gestor de sesión.
+        # Ejemplo: user_permissions = self.app_controller.get_current_user_permissions()
+        # Por ahora, usamos un conjunto fijo para la demostración.
+        user_permissions = {"puede_realizar_ventas", "puede_ver_inventario"}
+        print(f"ℹ️ Permisos del usuario actual: {user_permissions}")
+        
+        # Iteramos sobre todos los directorios dentro de la carpeta de Módulos
         for item in MODULES_DIR.iterdir():
             if item.is_dir():
                 manifest_path = item / "manifest.json"
                 if manifest_path.exists():
                     try:
                         with open(manifest_path, "r", encoding="utf-8") as f:
-                            installed.append(json.load(f))
-                    except Exception as e:
-                        print(f"⚠️ Error al leer el manifest del módulo '{item.name}': {e}")
+                            manifest = json.load(f)
+
+                        # --- VALIDACIÓN DE PERMISOS ---
+                        # Obtenemos la lista de permisos que el módulo requiere.
+                        required_permissions = set(manifest.get("permissions_required", []))
                         
+                        # Si el módulo no requiere permisos o si el usuario TIENE TODOS
+                        # los permisos requeridos, entonces se puede cargar.
+                        if not required_permissions or required_permissions.issubset(user_permissions):
+                            installed.append(manifest)
+                        else:
+                            # Si no se cumplen los permisos, lo informamos (útil para depurar)
+                            print(f"🚫 Módulo '{manifest.get('nombre')}' omitido por falta de permisos. "
+                                  f"Requiere: {required_permissions}")
+
+                    except json.JSONDecodeError as e:
+                        print(f"⚠️ Error de formato JSON en el manifest del módulo '{item.name}': {e}")
+                    except Exception as e:
+                        print(f"⚠️ Error genérico al leer el manifest del módulo '{item.name}': {e}")
+                        
+        # Devolvemos la lista de módulos permitidos, ordenada alfabéticamente por nombre.
         return sorted(installed, key=lambda m: m.get('nombre', ''))
+
 
     def _download_and_install_module(self, module_id, server_data):
         """

@@ -1,10 +1,15 @@
 {
   "id": "modula_ventas",
   "nombre": "Punto de Venta",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "descripcion": "Módulo principal para realizar ventas y gestionar transacciones.",
   "autor": "Addsy",
+  "category": "Ventas",
   "entry_point": "main_widget.py",
   "clase_principal": "PuntoDeVentaWidget",
-  "icono": "icono.svg"
+  "icono": "icono.svg",
+  "tags": ["pos", "caja", "transacciones", "ventas"],
+  "permissions_required": ["puede_realizar_ventas"],
+  "dependencies": [],
+  "min_core_version": "1.0.0"
 }
