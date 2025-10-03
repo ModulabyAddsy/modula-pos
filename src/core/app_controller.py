@@ -333,24 +333,45 @@ class AppController(QObject):
         """
         Manejador central para el resultado del worker de arranque.
         """
+        # Este bloque se ejecuta si el arranque NO FUE EXITOSO (status no es "ok").
         if not isinstance(result, dict) or result.get("status") != "ok":
-            # Si el arranque falla o requiere activación, vamos a la vista de Auth.
-            if result == "activacion_requerida" or "Terminal no encontrada" in result.get("message", ""):
+            
+            # 1. NUEVO: Manejamos específicamente el conflicto de ubicación.
+            if result.get("status") == "location_mismatch":
+                print("Conflicto de ubicación detectado. Se requiere login para resolver.")
+                QMessageBox.warning(self.main_window, "Conflicto de Ubicación", 
+                                    "Hemos detectado que estás en una nueva red o ubicación.\n\n"
+                                    "Por favor, inicia sesión con tu cuenta para autorizar este cambio.")
+                
+                self.respuesta_conflicto = result # Guardamos la respuesta para usarla después del login
+                
+                # Preparamos la vista de login para que llame al manejador de conflictos.
+                try:
+                    self.main_window.auth_view.login_solicitado.disconnect()
+                except RuntimeError:
+                    pass # Ignorar si no estaba conectada
+                
+                self.main_window.auth_view.login_solicitado.connect(self.handle_login_para_resolver_conflicto)
+                self.main_window.mostrar_vista_auth()
+
+            # 2. Mantenemos la lógica para otros tipos de error.
+            elif result == "activacion_requerida" or "Terminal no encontrada" in result.get("message", ""):
                 self.solicitar_login_activacion()
             else:
                 self.show_error(result.get("message", "Error desconocido en el arranque."))
                 self.main_window.mostrar_vista_auth()
+                
+            # 3. El return es clave: detiene la ejecución aquí si hubo cualquier error.
             return
-        
-                # --- LÓGICA DE MÓDULOS MOVIDA AQUÍ ---
-        # poblamos la barra lateral con los módulos que encontró el worker.
+
+        # --- Este código solo se ejecuta SI EL ARRANQUE FUE EXITOSO (status es "ok") ---
+
+        # LÓGICA DE MÓDULOS: Se ejecuta sin problemas en un arranque correcto.
         print(f"✅ Carga de módulos completada. {len(installed_modules)} módulos encontrados.")
         sidebar = self.main_window.dashboard_view.nav_sidebar
         sidebar.populate_modules(installed_modules, MODULES_DIR)
-        # ------------------------------------
 
-
-        # Si el arranque es exitoso, preparamos la vista de login local.
+        # Preparamos la vista de login local.
         self.main_window.mostrar_vista_login_local()
         
         # Conectamos las señales de la vista de login local para que los botones funcionen.
